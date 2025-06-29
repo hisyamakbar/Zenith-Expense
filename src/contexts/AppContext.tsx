@@ -24,12 +24,144 @@ type AppAction =
   | { type: 'SET_DEFAULT_CURRENCY'; payload: string }
   | { type: 'SET_HAS_SELECTED_CURRENCY'; payload: boolean };
 
+const DEFAULT_CATEGORIES = [
+  { id: 1, name: 'Food & Dining', is_default: true },
+  { id: 2, name: 'Transportation', is_default: true },
+  { id: 3, name: 'Shopping', is_default: true },
+  { id: 4, name: 'Entertainment', is_default: true },
+  { id: 5, name: 'Bills & Utilities', is_default: true },
+  { id: 6, name: 'Healthcare', is_default: true },
+  { id: 7, name: 'Travel', is_default: true },
+  { id: 8, name: 'Education', is_default: true },
+];
+
+// Sample expenses with realistic data matching categories
+const SAMPLE_EXPENSES: Expense[] = [
+  {
+    id: 1,
+    user_id: 'local',
+    category_id: 1,
+    item_service: 'Lunch at McDonald\'s',
+    amount: 45000,
+    currency_code: 'IDR',
+    expense_date: '2025-01-15',
+    note: 'Big Mac combo meal',
+    created_at: '2025-01-15T12:30:00Z',
+    category: DEFAULT_CATEGORIES[0]
+  },
+  {
+    id: 2,
+    user_id: 'local',
+    category_id: 2,
+    item_service: 'Grab ride to office',
+    amount: 25000,
+    currency_code: 'IDR',
+    expense_date: '2025-01-15',
+    created_at: '2025-01-15T08:15:00Z',
+    category: DEFAULT_CATEGORIES[1]
+  },
+  {
+    id: 3,
+    user_id: 'local',
+    category_id: 1,
+    item_service: 'Coffee at Starbucks',
+    amount: 5.50,
+    currency_code: 'USD',
+    expense_date: '2025-01-14',
+    note: 'Grande Americano',
+    created_at: '2025-01-14T16:45:00Z',
+    category: DEFAULT_CATEGORIES[0]
+  },
+  {
+    id: 4,
+    user_id: 'local',
+    category_id: 3,
+    item_service: 'New shirt from Uniqlo',
+    amount: 299000,
+    currency_code: 'IDR',
+    expense_date: '2025-01-14',
+    created_at: '2025-01-14T14:20:00Z',
+    category: DEFAULT_CATEGORIES[2]
+  },
+  {
+    id: 5,
+    user_id: 'local',
+    category_id: 5,
+    item_service: 'Electricity bill',
+    amount: 450000,
+    currency_code: 'IDR',
+    expense_date: '2025-01-13',
+    note: 'Monthly electricity payment',
+    created_at: '2025-01-13T10:00:00Z',
+    category: DEFAULT_CATEGORIES[4]
+  },
+  {
+    id: 6,
+    user_id: 'local',
+    category_id: 4,
+    item_service: 'Movie tickets',
+    amount: 12.50,
+    currency_code: 'USD',
+    expense_date: '2025-01-13',
+    note: 'Avatar 3 - 2 tickets',
+    created_at: '2025-01-13T19:30:00Z',
+    category: DEFAULT_CATEGORIES[3]
+  },
+  {
+    id: 7,
+    user_id: 'local',
+    category_id: 2,
+    item_service: 'Gas station fill-up',
+    amount: 350000,
+    currency_code: 'IDR',
+    expense_date: '2025-01-12',
+    created_at: '2025-01-12T17:15:00Z',
+    category: DEFAULT_CATEGORIES[1]
+  },
+  {
+    id: 8,
+    user_id: 'local',
+    category_id: 1,
+    item_service: 'Grocery shopping at Carrefour',
+    amount: 275000,
+    currency_code: 'IDR',
+    expense_date: '2025-01-12',
+    note: 'Weekly groceries',
+    created_at: '2025-01-12T11:45:00Z',
+    category: DEFAULT_CATEGORIES[0]
+  },
+  {
+    id: 9,
+    user_id: 'local',
+    category_id: 6,
+    item_service: 'Doctor consultation',
+    amount: 200000,
+    currency_code: 'IDR',
+    expense_date: '2025-01-11',
+    note: 'General checkup',
+    created_at: '2025-01-11T15:30:00Z',
+    category: DEFAULT_CATEGORIES[5]
+  },
+  {
+    id: 10,
+    user_id: 'local',
+    category_id: 8,
+    item_service: 'Online course subscription',
+    amount: 29.99,
+    currency_code: 'USD',
+    expense_date: '2025-01-10',
+    note: 'Udemy React course',
+    created_at: '2025-01-10T09:00:00Z',
+    category: DEFAULT_CATEGORIES[7]
+  }
+];
+
 const initialState: AppState = {
   user: null,
   isAuthenticated: false,
   currencies: [],
-  categories: [],
-  expenses: [],
+  categories: DEFAULT_CATEGORIES,
+  expenses: SAMPLE_EXPENSES,
   isLoading: true,
   hasSelectedCurrency: false,
   defaultCurrency: null,
