@@ -1,0 +1,72 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: 'Space Mono', monospace;
+  }
+  
+  body {
+    background-color: #121212;
+    color: #FFFFFF;
+    font-feature-settings: 'liga' 1, 'calt' 1;
+  }
+  
+  * {
+    box-sizing: border-box;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply px-6 py-3 rounded-lg font-mono font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-background;
+  }
+  
+  .btn-primary {
+    @apply btn bg-primary text-background hover:bg-primary/90 focus:ring-primary;
+  }
+  
+  .btn-secondary {
+    @apply btn bg-surface border border-text-muted text-text hover:bg-surface-light focus:ring-text-muted;
+  }
+  
+  .btn-accent {
+    @apply btn bg-accent text-background hover:bg-accent/90 focus:ring-accent;
+  }
+  
+  .card {
+    @apply bg-surface rounded-xl p-6 border border-surface-light;
+  }
+  
+  .input {
+    @apply w-full px-4 py-3 bg-surface border border-surface-light rounded-lg text-text placeholder-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary font-mono;
+  }
+  
+  .nav-item {
+    @apply flex flex-col items-center justify-center p-3 text-text-muted hover:text-primary transition-colors duration-200 min-h-[44px] min-w-[44px];
+  }
+  
+  .nav-item.active {
+    @apply text-primary;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1E1E1E;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #4CAF50;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #45a049;
+}
