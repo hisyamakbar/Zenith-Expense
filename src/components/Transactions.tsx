@@ -1,8 +1,9 @@
-import React, { useState, useMemo } from 'react';
-import { Search, Filter, Edit, Trash2, Plus, Save, X } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Search, Filter, Edit, Trash2, Plus, Save, X, RefreshCw } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../contexts/AppContext';
 import { format } from 'date-fns';
+import { convertCurrency, formatCurrency as formatCurrencyWithSymbol } from '../lib/currencyApi';
 
 const DEFAULT_CATEGORIES = [
   { id: 1, name: 'Food & Dining' },
@@ -22,6 +23,8 @@ export function Transactions() {
   const [sortBy, setSortBy] = useState<'date' | 'amount'>('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [editingTransaction, setEditingTransaction] = useState<number | null>(null);
+  const [convertedExpenses, setConvertedExpenses] = useState<any[]>([]);
+  const [isConverting, setIsConverting] = useState(false);
   const [editForm, setEditForm] = useState({
     item_service: '',
     amount: '',
@@ -33,8 +36,43 @@ export function Transactions() {
 
   const allCategories = [...DEFAULT_CATEGORIES, ...state.categories.filter(cat => !cat.is_default)];
 
+  // Convert all expenses to default currency for display
+  useEffect(() => {
+    const convertExpenses = async () => {
+      if (!state.defaultCurrency || state.expenses.length === 0) return;
+      
+      setIsConverting(true);
+      try {
+        const converted = await Promise.all(
+          state.expenses.map(async (expense) => {
+            if (expense.currency_code === state.defaultCurrency) {
+              return { ...expense, convertedAmount: expense.amount };
+            }
+            
+            const conversion = await convertCurrency(
+              expense.amount,
+              expense.currency_code,
+              state.defaultCurrency!
+            );
+            
+            return { ...expense, convertedAmount: conversion.convertedAmount };
+          })
+        );
+        setConvertedExpenses(converted);
+      } catch (error) {
+        console.error('Error converting currencies:', error);
+        setConvertedExpenses(state.expenses.map(exp => ({ ...exp, convertedAmount: exp.amount })));
+      } finally {
+        setIsConverting(false);
+      }
+    };
+
+    convertExpenses();
+  }, [state.expenses, state.defaultCurrency]);
+
   const filteredTransactions = useMemo(() => {
-    let filtered = [...state.expenses];
+    const expensesToUse = convertedExpenses.length > 0 ? convertedExpenses : state.expenses;
+    let filtered = [...expensesToUse];
 
     // Filter by search term
     if (searchTerm) {
@@ -58,23 +96,22 @@ export function Transactions() {
         const dateB = new Date(b.expense_date).getTime();
         return sortOrder === 'desc' ? dateB - dateA : dateA - dateB;
       } else {
-        return sortOrder === 'desc' ? b.amount - a.amount : a.amount - b.amount;
+        const amountA = a.convertedAmount || a.amount;
+        const amountB = b.convertedAmount || b.amount;
+        return sortOrder === 'desc' ? amountB - amountA : amountA - amountB;
       }
     });
 
     return filtered;
-  }, [state.expenses, searchTerm, selectedCategory, sortBy, sortOrder]);
+  }, [convertedExpenses, state.expenses, searchTerm, selectedCategory, sortBy, sortOrder]);
 
   const formatCurrency = (amount: number, currency: string) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: currency,
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 2,
-    }).format(amount);
+    return formatCurrencyWithSymbol(amount, currency);
   };
 
-  const totalAmount = filteredTransactions.reduce((sum, expense) => sum + expense.amount, 0);
+  const totalAmount = filteredTransactions.reduce((sum, expense) => 
+    sum + (expense.convertedAmount || expense.amount), 0
+  );
 
   const handleEditTransaction = (transaction: any) => {
     setEditingTransaction(transaction.id);
@@ -88,13 +125,14 @@ export function Transactions() {
     });
   };
 
-  const handleSaveEdit = () => {
+  const handleSaveEdit = async () => {
     if (!editForm.item_service || !editForm.amount || !editForm.category_id) {
       return;
     }
 
+    const originalTransaction = state.expenses.find(exp => exp.id === editingTransaction)!;
     const updatedTransaction = {
-      ...state.expenses.find(exp => exp.id === editingTransaction)!,
+      ...originalTransaction,
       item_service: editForm.item_service,
       amount: parseFloat(editForm.amount),
       currency_code: editForm.currency_code,
@@ -105,6 +143,43 @@ export function Transactions() {
     };
 
     dispatch({ type: 'UPDATE_EXPENSE', payload: updatedTransaction });
+    
+    // If currency changed, trigger conversion update
+    if (originalTransaction.currency_code !== editForm.currency_code) {
+      setIsConverting(true);
+      try {
+        if (editForm.currency_code === state.defaultCurrency) {
+          // No conversion needed
+          setConvertedExpenses(prev => 
+            prev.map(exp => 
+              exp.id === editingTransaction 
+                ? { ...updatedTransaction, convertedAmount: updatedTransaction.amount }
+                : exp
+            )
+          );
+        } else {
+          // Convert to default currency
+          const conversion = await convertCurrency(
+            updatedTransaction.amount,
+            updatedTransaction.currency_code,
+            state.defaultCurrency!
+          );
+          
+          setConvertedExpenses(prev => 
+            prev.map(exp => 
+              exp.id === editingTransaction 
+                ? { ...updatedTransaction, convertedAmount: conversion.convertedAmount }
+                : exp
+            )
+          );
+        }
+      } catch (error) {
+        console.error('Error converting updated transaction:', error);
+      } finally {
+        setIsConverting(false);
+      }
+    }
+
     setEditingTransaction(null);
     setEditForm({
       item_service: '',
@@ -131,6 +206,34 @@ export function Transactions() {
   const handleDeleteTransaction = (id: number) => {
     if (window.confirm('Are you sure you want to delete this transaction?')) {
       dispatch({ type: 'DELETE_EXPENSE', payload: id });
+      // Remove from converted expenses as well
+      setConvertedExpenses(prev => prev.filter(exp => exp.id !== id));
+    }
+  };
+
+  const handleRefreshRates = async () => {
+    setIsConverting(true);
+    try {
+      const converted = await Promise.all(
+        state.expenses.map(async (expense) => {
+          if (expense.currency_code === state.defaultCurrency) {
+            return { ...expense, convertedAmount: expense.amount };
+          }
+          
+          const conversion = await convertCurrency(
+            expense.amount,
+            expense.currency_code,
+            state.defaultCurrency!
+          );
+          
+          return { ...expense, convertedAmount: conversion.convertedAmount };
+        })
+      );
+      setConvertedExpenses(converted);
+    } catch (error) {
+      console.error('Error refreshing exchange rates:', error);
+    } finally {
+      setIsConverting(false);
     }
   };
 
@@ -142,12 +245,25 @@ export function Transactions() {
           <h1 className="text-2xl font-bold text-text font-mono">Transactions</h1>
           <p className="text-text-secondary font-mono">
             {filteredTransactions.length} transactions • Total: {formatCurrency(totalAmount, state.defaultCurrency || 'USD')}
+            {isConverting && (
+              <span className="ml-2 text-accent text-sm">• Converting...</span>
+            )}
           </p>
         </div>
-        <Link to="/add-expense" className="btn-primary flex items-center space-x-2">
-          <Plus size={16} />
-          <span>Add Expense</span>
-        </Link>
+        <div className="flex space-x-3">
+          <button
+            onClick={handleRefreshRates}
+            disabled={isConverting}
+            className="btn-secondary flex items-center space-x-2"
+          >
+            <RefreshCw size={16} className={isConverting ? 'animate-spin' : ''} />
+            <span>Refresh Rates</span>
+          </button>
+          <Link to="/add-expense" className="btn-primary flex items-center space-x-2">
+            <Plus size={16} />
+            <span>Add Expense</span>
+          </Link>
+        </div>
       </div>
 
       {/* Filters */}
@@ -250,6 +366,8 @@ export function Transactions() {
                           <option value="JPY">JPY</option>
                           <option value="IDR">IDR</option>
                           <option value="SGD">SGD</option>
+                          <option value="AUD">AUD</option>
+                          <option value="CAD">CAD</option>
                         </select>
                       </div>
                     </div>
@@ -323,9 +441,9 @@ export function Transactions() {
                         <p className="font-semibold text-text font-mono">
                           -{formatCurrency(transaction.amount, transaction.currency_code)}
                         </p>
-                        {transaction.currency_code !== state.defaultCurrency && (
+                        {transaction.currency_code !== state.defaultCurrency && transaction.convertedAmount && (
                           <p className="text-xs text-text-muted font-mono">
-                            ≈ -{formatCurrency(transaction.amount, state.defaultCurrency || 'USD')}
+                            ≈ -{formatCurrency(transaction.convertedAmount, state.defaultCurrency || 'USD')}
                           </p>
                         )}
                       </div>

@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
-import { Save, X, Calendar, DollarSign, Tag, FileText } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Save, X, Calendar, DollarSign, Tag, FileText, Info } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../contexts/AppContext';
 import { format } from 'date-fns';
+import { convertCurrency, formatCurrency as formatCurrencyWithSymbol } from '../lib/currencyApi';
 
 const DEFAULT_CATEGORIES = [
   { id: 1, name: 'Food & Dining' },
@@ -27,8 +28,45 @@ export function AddExpense() {
     note: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [conversionPreview, setConversionPreview] = useState<{
+    convertedAmount: number;
+    exchangeRate: number;
+  } | null>(null);
+  const [isConverting, setIsConverting] = useState(false);
 
   const allCategories = [...DEFAULT_CATEGORIES, ...state.categories.filter(cat => !cat.is_default)];
+
+  // Show conversion preview when amount and currency change
+  useEffect(() => {
+    const showConversion = async () => {
+      if (!formData.amount || !formData.currency_code || !state.defaultCurrency) return;
+      if (formData.currency_code === state.defaultCurrency) {
+        setConversionPreview(null);
+        return;
+      }
+
+      setIsConverting(true);
+      try {
+        const conversion = await convertCurrency(
+          parseFloat(formData.amount),
+          formData.currency_code,
+          state.defaultCurrency
+        );
+        setConversionPreview({
+          convertedAmount: conversion.convertedAmount,
+          exchangeRate: conversion.exchangeRate
+        });
+      } catch (error) {
+        console.error('Error getting conversion preview:', error);
+        setConversionPreview(null);
+      } finally {
+        setIsConverting(false);
+      }
+    };
+
+    const debounceTimer = setTimeout(showConversion, 500);
+    return () => clearTimeout(debounceTimer);
+  }, [formData.amount, formData.currency_code, state.defaultCurrency]);
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({
@@ -148,8 +186,29 @@ export function AddExpense() {
               <option value="JPY">JPY (¥)</option>
               <option value="IDR">IDR (Rp)</option>
               <option value="SGD">SGD (S$)</option>
+              <option value="AUD">AUD (A$)</option>
+              <option value="CAD">CAD (C$)</option>
             </select>
           </div>
+          
+          {/* Conversion Preview */}
+          {conversionPreview && (
+            <div className="mt-3 p-3 bg-primary/5 border border-primary/20 rounded-lg">
+              <div className="flex items-center space-x-2 text-sm">
+                <Info size={14} className="text-primary" />
+                <span className="text-text font-mono">
+                  {isConverting ? 'Converting...' : (
+                    <>
+                      ≈ {formatCurrencyWithSymbol(conversionPreview.convertedAmount, state.defaultCurrency!)} 
+                      <span className="text-text-muted ml-2">
+                        (Rate: {conversionPreview.exchangeRate.toFixed(4)})
+                      </span>
+                    </>
+                  )}
+                </span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Category */}
@@ -232,6 +291,7 @@ export function AddExpense() {
         <ul className="text-sm text-text-secondary font-mono space-y-2">
           <li>• Be specific with item names for better tracking</li>
           <li>• Use the original currency for accurate records</li>
+          <li>• Conversion rates are updated automatically</li>
           <li>• Add notes for tax-deductible or important expenses</li>
           {state.isAuthenticated && (
             <li>• Try the AI Assistant for voice expense entry</li>
