@@ -10,6 +10,7 @@ type AppState = {
   isLoading: boolean;
   hasSelectedCurrency: boolean;
   defaultCurrency: string | null;
+  authError: string | null;
 };
 
 type AppAction = 
@@ -22,7 +23,8 @@ type AppAction =
   | { type: 'DELETE_EXPENSE'; payload: number }
   | { type: 'SET_LOADING'; payload: boolean }
   | { type: 'SET_DEFAULT_CURRENCY'; payload: string }
-  | { type: 'SET_HAS_SELECTED_CURRENCY'; payload: boolean };
+  | { type: 'SET_HAS_SELECTED_CURRENCY'; payload: boolean }
+  | { type: 'SET_AUTH_ERROR'; payload: string | null };
 
 const DEFAULT_CATEGORIES = [
   { id: 1, name: 'Food & Dining', is_default: true },
@@ -189,6 +191,7 @@ const initialState: AppState = {
   isLoading: true,
   hasSelectedCurrency: false,
   defaultCurrency: null,
+  authError: null,
 };
 
 function appReducer(state: AppState, action: AppAction): AppState {
@@ -198,6 +201,7 @@ function appReducer(state: AppState, action: AppAction): AppState {
         ...state,
         user: action.payload,
         isAuthenticated: !!action.payload,
+        authError: null, // Clear auth error when user is set
       };
     case 'SET_CURRENCIES':
       return {
@@ -246,6 +250,11 @@ function appReducer(state: AppState, action: AppAction): AppState {
         ...state,
         hasSelectedCurrency: action.payload,
       };
+    case 'SET_AUTH_ERROR':
+      return {
+        ...state,
+        authError: action.payload,
+      };
     default:
       return state;
   }
@@ -261,9 +270,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
+    let initTimeout: NodeJS.Timeout;
 
     const initializeApp = async () => {
       try {
+        console.log('🚀 Initializing app...');
+        
         // Check if user has selected a default currency
         const hasSelected = localStorage.getItem('hasSelectedCurrency');
         const defaultCurrency = localStorage.getItem('defaultCurrency');
@@ -273,97 +285,172 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           dispatch({ type: 'SET_DEFAULT_CURRENCY', payload: defaultCurrency });
         }
 
-        // Initialize auth state
+        // Set a timeout to ensure loading doesn't get stuck
+        initTimeout = setTimeout(() => {
+          if (mounted) {
+            console.log('⏰ Init timeout reached, stopping loading...');
+            dispatch({ type: 'SET_LOADING', payload: false });
+          }
+        }, 5000); // 5 second timeout
+
+        // Initialize auth state with timeout
+        console.log('🔐 Getting initial session...');
         const { data: { session }, error: sessionError } = await supabase.auth.getSession();
         
         if (sessionError) {
-          console.error('Error getting session:', sessionError);
+          console.error('❌ Session error:', sessionError);
+          dispatch({ type: 'SET_AUTH_ERROR', payload: sessionError.message });
         }
 
         if (session?.user && mounted) {
+          console.log('👤 Found existing session for user:', session.user.id);
           await fetchUserProfile(session.user.id);
+        } else {
+          console.log('👤 No existing session found');
         }
       } catch (error) {
-        console.error('Error initializing app:', error);
+        console.error('❌ Error initializing app:', error);
+        if (mounted) {
+          dispatch({ type: 'SET_AUTH_ERROR', payload: 'Failed to initialize app' });
+        }
       } finally {
         if (mounted) {
+          clearTimeout(initTimeout);
           dispatch({ type: 'SET_LOADING', payload: false });
+          console.log('✅ App initialization complete');
         }
       }
     };
 
     initializeApp();
 
-    // Listen for auth changes
+    // Listen for auth changes with timeout protection
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return;
 
-      console.log('Auth state changed:', event, session?.user?.id);
+      console.log('🔄 Auth state changed:', event, session?.user?.id);
 
-      if (event === 'SIGNED_IN' && session?.user) {
-        await fetchUserProfile(session.user.id);
-      } else if (event === 'SIGNED_OUT') {
-        dispatch({ type: 'SET_USER', payload: null });
+      // Clear any existing auth errors
+      dispatch({ type: 'SET_AUTH_ERROR', payload: null });
+
+      try {
+        if (event === 'SIGNED_IN' && session?.user) {
+          console.log('✅ User signed in:', session.user.id);
+          await fetchUserProfile(session.user.id);
+        } else if (event === 'SIGNED_OUT') {
+          console.log('👋 User signed out');
+          dispatch({ type: 'SET_USER', payload: null });
+        } else if (event === 'TOKEN_REFRESHED' && session?.user) {
+          console.log('🔄 Token refreshed for user:', session.user.id);
+          // Don't fetch profile again on token refresh if we already have user data
+          if (!state.user) {
+            await fetchUserProfile(session.user.id);
+          }
+        }
+      } catch (error) {
+        console.error('❌ Error in auth state change:', error);
+        if (mounted) {
+          dispatch({ type: 'SET_AUTH_ERROR', payload: 'Authentication error occurred' });
+        }
       }
     });
 
     return () => {
       mounted = false;
+      clearTimeout(initTimeout);
       subscription.unsubscribe();
+      console.log('🧹 AppContext cleanup complete');
     };
   }, []);
 
   const fetchUserProfile = async (userId: string) => {
     try {
-      console.log('Fetching user profile for:', userId);
+      console.log('👤 Fetching user profile for:', userId);
 
-      // Use maybeSingle() to handle cases where no row exists
-      const { data: profile, error } = await supabase
+      // Set a timeout for profile fetching
+      const profileTimeout = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Profile fetch timeout')), 10000)
+      );
+
+      const profileFetch = supabase
         .from('users')
         .select('*')
         .eq('id', userId)
         .maybeSingle();
 
+      const { data: profile, error } = await Promise.race([profileFetch, profileTimeout]) as any;
+
       if (error) {
-        console.error('Error fetching user profile:', error);
+        console.error('❌ Error fetching user profile:', error);
+        // Don't throw error, just log it and continue
         return;
       }
 
       if (profile) {
-        console.log('User profile found:', profile);
+        console.log('✅ User profile found:', profile.email);
         dispatch({ type: 'SET_USER', payload: profile });
       } else {
-        // User profile doesn't exist, create it
-        console.log('User profile not found, creating new profile...');
+        // User profile doesn't exist, try to create it
+        console.log('🆕 User profile not found, creating new profile...');
         
         const { data: authUser } = await supabase.auth.getUser();
         
         if (authUser.user) {
+          const newProfileData = {
+            id: authUser.user.id,
+            email: authUser.user.email,
+            default_currency_code: 'USD',
+            subscription_tier: 'basic',
+            llm_uses_today: 0,
+            last_llm_reset_date: new Date().toISOString().split('T')[0]
+          };
+
+          console.log('📝 Creating profile with data:', newProfileData);
+
           const { data: newProfile, error: createError } = await supabase
             .from('users')
-            .insert({
-              id: authUser.user.id,
-              email: authUser.user.email,
-              default_currency_code: 'USD',
-              subscription_tier: 'basic',
-              llm_uses_today: 0,
-              last_llm_reset_date: new Date().toISOString().split('T')[0]
-            })
+            .insert(newProfileData)
             .select()
             .single();
 
           if (createError) {
-            console.error('Error creating user profile:', createError);
-            // Don't throw error, just log it
+            console.error('❌ Error creating user profile:', createError);
+            // Still set a basic user object so the app doesn't get stuck
+            dispatch({ type: 'SET_USER', payload: {
+              id: authUser.user.id,
+              email: authUser.user.email || '',
+              default_currency_code: 'USD',
+              subscription_tier: 'basic',
+              llm_uses_today: 0,
+              last_llm_reset_date: new Date().toISOString().split('T')[0],
+              created_at: new Date().toISOString()
+            } });
           } else if (newProfile) {
-            console.log('New user profile created:', newProfile);
+            console.log('✅ New user profile created:', newProfile.email);
             dispatch({ type: 'SET_USER', payload: newProfile });
           }
         }
       }
     } catch (error) {
-      console.error('Error in fetchUserProfile:', error);
+      console.error('❌ Error in fetchUserProfile:', error);
       // Don't throw error to prevent infinite loading
+      // Set a basic user object if we have auth user data
+      try {
+        const { data: authUser } = await supabase.auth.getUser();
+        if (authUser.user) {
+          dispatch({ type: 'SET_USER', payload: {
+            id: authUser.user.id,
+            email: authUser.user.email || '',
+            default_currency_code: 'USD',
+            subscription_tier: 'basic',
+            llm_uses_today: 0,
+            last_llm_reset_date: new Date().toISOString().split('T')[0],
+            created_at: new Date().toISOString()
+          } });
+        }
+      } catch (fallbackError) {
+        console.error('❌ Fallback user creation failed:', fallbackError);
+      }
     }
   };
 

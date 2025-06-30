@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Mail, Lock, User, ArrowLeft, AlertCircle, CheckCircle } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
@@ -13,51 +13,33 @@ export function Auth() {
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
   const navigate = useNavigate();
-  const { dispatch } = useApp();
+  const { state, dispatch } = useApp();
 
-  const createUserProfile = async (userId: string, userEmail: string) => {
-    try {
-      // First check if profile already exists
-      const { data: existingProfile } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
+  // Debug: Log current auth state
+  useEffect(() => {
+    console.log('🔍 Auth component state:', {
+      isAuthenticated: state.isAuthenticated,
+      user: state.user?.email,
+      isLoading: state.isLoading,
+      authError: state.authError
+    });
+  }, [state]);
 
-      if (existingProfile) {
-        return existingProfile;
-      }
-
-      // Create new profile
-      const { data: newProfile, error: createError } = await supabase
-        .from('users')
-        .insert({
-          id: userId,
-          email: userEmail,
-          default_currency_code: 'USD',
-          subscription_tier: 'basic',
-          llm_uses_today: 0,
-          last_llm_reset_date: new Date().toISOString().split('T')[0]
-        })
-        .select()
-        .single();
-
-      if (createError) {
-        console.error('Error creating user profile:', createError);
-        throw createError;
-      }
-
-      return newProfile;
-    } catch (error) {
-      console.error('Error in createUserProfile:', error);
-      throw error;
+  // Auto redirect if already authenticated
+  useEffect(() => {
+    if (state.isAuthenticated && state.user && !state.isLoading) {
+      console.log('🔄 Already authenticated, redirecting...');
+      navigate('/');
     }
-  };
+  }, [state.isAuthenticated, state.user, state.isLoading, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setMessage(null);
+
+    // Clear any existing auth errors
+    dispatch({ type: 'SET_AUTH_ERROR', payload: null });
 
     // Basic validation
     if (!email.trim() || !password.trim()) {
@@ -72,7 +54,15 @@ export function Auth() {
       return;
     }
 
+    // Set a timeout to prevent infinite loading
+    const authTimeout = setTimeout(() => {
+      setIsLoading(false);
+      setMessage({ type: 'error', text: 'Authentication timeout. Please try again.' });
+    }, 15000); // 15 second timeout
+
     try {
+      console.log(`🔐 Starting ${mode} for:`, email);
+
       if (mode === 'signup') {
         // Sign up new user
         const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
@@ -83,6 +73,8 @@ export function Auth() {
           }
         });
 
+        clearTimeout(authTimeout);
+
         if (signUpError) {
           throw signUpError;
         }
@@ -90,6 +82,8 @@ export function Auth() {
         if (!signUpData.user) {
           throw new Error('Failed to create user account');
         }
+
+        console.log('✅ Signup successful:', signUpData.user.id);
 
         // Check if user needs email confirmation
         if (!signUpData.session && signUpData.user && !signUpData.user.email_confirmed_at) {
@@ -104,23 +98,15 @@ export function Auth() {
 
         // If we have a session, the user is automatically signed in
         if (signUpData.session && signUpData.user) {
-          try {
-            const profile = await createUserProfile(signUpData.user.id, signUpData.user.email || email);
-            dispatch({ type: 'SET_USER', payload: profile });
-            setMessage({ type: 'success', text: 'Account created successfully! Redirecting...' });
-            
-            // Small delay to show success message
-            setTimeout(() => {
+          setMessage({ type: 'success', text: 'Account created successfully! Redirecting...' });
+          
+          // The AppContext auth listener will handle profile creation and navigation
+          setTimeout(() => {
+            if (!state.isAuthenticated) {
+              console.log('🔄 Manual redirect after signup');
               navigate('/');
-            }, 1000);
-          } catch (profileError) {
-            console.error('Profile creation error:', profileError);
-            setMessage({ 
-              type: 'error', 
-              text: 'Account created but there was an issue setting up your profile. Please try signing in.' 
-            });
-            setMode('login');
-          }
+            }
+          }, 2000);
         } else {
           setMessage({ 
             type: 'success', 
@@ -135,6 +121,8 @@ export function Auth() {
           password,
         });
 
+        clearTimeout(authTimeout);
+
         if (signInError) {
           throw signInError;
         }
@@ -143,17 +131,21 @@ export function Auth() {
           throw new Error('Failed to sign in');
         }
 
-        // The AppContext will handle fetching/creating the user profile
-        // via the auth state change listener
+        console.log('✅ Signin successful:', signInData.user.id);
+
         setMessage({ type: 'success', text: 'Signed in successfully! Redirecting...' });
         
-        // Small delay to show success message
+        // The AppContext auth listener will handle profile fetching and navigation
         setTimeout(() => {
-          navigate('/');
-        }, 1000);
+          if (!state.isAuthenticated) {
+            console.log('🔄 Manual redirect after signin');
+            navigate('/');
+          }
+        }, 2000);
       }
     } catch (error: any) {
-      console.error('Authentication error:', error);
+      clearTimeout(authTimeout);
+      console.error('❌ Authentication error:', error);
       
       // Handle specific error cases with more user-friendly messages
       let errorMessage = 'An unexpected error occurred. Please try again.';
@@ -175,6 +167,8 @@ export function Auth() {
         errorMessage = 'Too many attempts. Please wait a moment before trying again.';
       } else if (error.message?.includes('signup is disabled')) {
         errorMessage = 'New registrations are currently disabled. Please contact support.';
+      } else if (error.message?.includes('Network request failed')) {
+        errorMessage = 'Network error. Please check your internet connection and try again.';
       } else if (error.message) {
         errorMessage = error.message;
       }
@@ -191,6 +185,25 @@ export function Auth() {
     setEmail('');
     setPassword('');
   };
+
+  // Show loading state if app is still initializing
+  if (state.isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mx-auto mb-6">
+            <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent"></div>
+          </div>
+          <h2 className="text-xl font-bold text-text font-mono mb-2">
+            Loading...
+          </h2>
+          <p className="text-text-secondary font-mono">
+            Initializing application
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-6">
@@ -219,6 +232,18 @@ export function Auth() {
             }
           </p>
         </div>
+
+        {/* Auth Error from AppContext */}
+        {state.authError && (
+          <div className="card mb-6 border-2 border-error/20 bg-error/5">
+            <div className="flex items-center space-x-3">
+              <AlertCircle size={20} className="text-error" />
+              <p className="font-mono text-sm text-error">
+                {state.authError}
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Message */}
         {message && (
@@ -321,6 +346,22 @@ export function Auth() {
             {mode === 'login' ? 'Create Account' : 'Sign In'}
           </button>
         </div>
+
+        {/* Debug Info (only in development) */}
+        {import.meta.env.DEV && (
+          <div className="mt-8 p-4 bg-surface-light rounded-lg">
+            <h4 className="text-xs font-mono text-text-muted mb-2">Debug Info:</h4>
+            <pre className="text-xs font-mono text-text-muted">
+              {JSON.stringify({
+                isAuthenticated: state.isAuthenticated,
+                hasUser: !!state.user,
+                userEmail: state.user?.email,
+                isLoading: state.isLoading,
+                authError: state.authError
+              }, null, 2)}
+            </pre>
+          </div>
+        )}
 
         {/* Features Preview */}
         <div className="card mt-8 border-accent/20 bg-accent/5">
