@@ -1,9 +1,9 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Search, Filter, Edit, Trash2, Plus, Save, X, RefreshCw } from 'lucide-react';
+import { Search, Filter, Edit, Trash2, Plus, Save, X, RefreshCw, AlertCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../contexts/AppContext';
 import { format } from 'date-fns';
-import { convertCurrency, formatCurrency as formatCurrencyWithSymbol } from '../lib/currencyApi';
+import { convertCurrency, formatCurrency as formatCurrencyWithSymbol, clearRateCache } from '../lib/currencyApi';
 
 const DEFAULT_CATEGORIES = [
   { id: 1, name: 'Food & Dining' },
@@ -25,6 +25,7 @@ export function Transactions() {
   const [editingTransaction, setEditingTransaction] = useState<number | null>(null);
   const [convertedExpenses, setConvertedExpenses] = useState<any[]>([]);
   const [isConverting, setIsConverting] = useState(false);
+  const [conversionError, setConversionError] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({
     item_service: '',
     amount: '',
@@ -42,6 +43,8 @@ export function Transactions() {
       if (!state.defaultCurrency || state.expenses.length === 0) return;
       
       setIsConverting(true);
+      setConversionError(null);
+      
       try {
         const converted = await Promise.all(
           state.expenses.map(async (expense) => {
@@ -49,18 +52,25 @@ export function Transactions() {
               return { ...expense, convertedAmount: expense.amount };
             }
             
-            const conversion = await convertCurrency(
-              expense.amount,
-              expense.currency_code,
-              state.defaultCurrency!
-            );
-            
-            return { ...expense, convertedAmount: conversion.convertedAmount };
+            try {
+              const conversion = await convertCurrency(
+                expense.amount,
+                expense.currency_code,
+                state.defaultCurrency!
+              );
+              
+              return { ...expense, convertedAmount: conversion.convertedAmount };
+            } catch (error) {
+              console.error(`Error converting ${expense.currency_code} to ${state.defaultCurrency}:`, error);
+              // Return original amount as fallback
+              return { ...expense, convertedAmount: expense.amount };
+            }
           })
         );
         setConvertedExpenses(converted);
       } catch (error) {
         console.error('Error converting currencies:', error);
+        setConversionError('Failed to convert currencies. Showing original amounts.');
         setConvertedExpenses(state.expenses.map(exp => ({ ...exp, convertedAmount: exp.amount })));
       } finally {
         setIsConverting(false);
@@ -145,7 +155,8 @@ export function Transactions() {
     dispatch({ type: 'UPDATE_EXPENSE', payload: updatedTransaction });
     
     // If currency changed, trigger conversion update
-    if (originalTransaction.currency_code !== editForm.currency_code) {
+    if (originalTransaction.currency_code !== editForm.currency_code || 
+        originalTransaction.amount !== parseFloat(editForm.amount)) {
       setIsConverting(true);
       try {
         if (editForm.currency_code === state.defaultCurrency) {
@@ -175,6 +186,14 @@ export function Transactions() {
         }
       } catch (error) {
         console.error('Error converting updated transaction:', error);
+        // Use original amount as fallback
+        setConvertedExpenses(prev => 
+          prev.map(exp => 
+            exp.id === editingTransaction 
+              ? { ...updatedTransaction, convertedAmount: updatedTransaction.amount }
+              : exp
+          )
+        );
       } finally {
         setIsConverting(false);
       }
@@ -213,6 +232,11 @@ export function Transactions() {
 
   const handleRefreshRates = async () => {
     setIsConverting(true);
+    setConversionError(null);
+    
+    // Clear cache to force fresh rates
+    clearRateCache();
+    
     try {
       const converted = await Promise.all(
         state.expenses.map(async (expense) => {
@@ -232,6 +256,7 @@ export function Transactions() {
       setConvertedExpenses(converted);
     } catch (error) {
       console.error('Error refreshing exchange rates:', error);
+      setConversionError('Failed to refresh exchange rates. Using cached rates.');
     } finally {
       setIsConverting(false);
     }
@@ -255,6 +280,7 @@ export function Transactions() {
             onClick={handleRefreshRates}
             disabled={isConverting}
             className="btn-secondary flex items-center space-x-2"
+            title="Refresh exchange rates"
           >
             <RefreshCw size={16} className={isConverting ? 'animate-spin' : ''} />
             <span>Refresh Rates</span>
@@ -265,6 +291,25 @@ export function Transactions() {
           </Link>
         </div>
       </div>
+
+      {/* Conversion Error Alert */}
+      {conversionError && (
+        <div className="card border-error/20 bg-error/5">
+          <div className="flex items-center space-x-3">
+            <AlertCircle size={20} className="text-error flex-shrink-0" />
+            <div>
+              <p className="text-error font-mono font-semibold">Currency Conversion Issue</p>
+              <p className="text-text-secondary font-mono text-sm">{conversionError}</p>
+            </div>
+            <button
+              onClick={handleRefreshRates}
+              className="btn-secondary ml-auto"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="card">
@@ -311,6 +356,7 @@ export function Transactions() {
             <button
               onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
               className="btn-secondary px-3"
+              title={`Currently sorting ${sortOrder === 'desc' ? 'descending' : 'ascending'}`}
             >
               {sortOrder === 'desc' ? '↓' : '↑'}
             </button>
@@ -344,7 +390,7 @@ export function Transactions() {
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-text font-mono mb-2">
-                        Amount
+                        Amount & Currency
                       </label>
                       <div className="flex space-x-2">
                         <input
@@ -368,6 +414,8 @@ export function Transactions() {
                           <option value="SGD">SGD</option>
                           <option value="AUD">AUD</option>
                           <option value="CAD">CAD</option>
+                          <option value="CNY">CNY</option>
+                          <option value="INR">INR</option>
                         </select>
                       </div>
                     </div>
@@ -461,12 +509,14 @@ export function Transactions() {
                         <button 
                           onClick={() => handleEditTransaction(transaction)}
                           className="p-2 text-text-muted hover:text-primary transition-colors duration-200"
+                          title="Edit transaction"
                         >
                           <Edit size={16} />
                         </button>
                         <button 
                           onClick={() => handleDeleteTransaction(transaction.id)}
                           className="p-2 text-text-muted hover:text-error transition-colors duration-200"
+                          title="Delete transaction"
                         >
                           <Trash2 size={16} />
                         </button>

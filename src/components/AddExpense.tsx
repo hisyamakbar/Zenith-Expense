@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, X, Calendar, DollarSign, Tag, FileText, Info } from 'lucide-react';
+import { Save, X, Calendar, DollarSign, Tag, FileText, Info, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../contexts/AppContext';
 import { format } from 'date-fns';
@@ -33,6 +33,7 @@ export function AddExpense() {
     exchangeRate: number;
   } | null>(null);
   const [isConverting, setIsConverting] = useState(false);
+  const [conversionError, setConversionError] = useState<string | null>(null);
 
   const allCategories = [...DEFAULT_CATEGORIES, ...state.categories.filter(cat => !cat.is_default)];
 
@@ -42,10 +43,13 @@ export function AddExpense() {
       if (!formData.amount || !formData.currency_code || !state.defaultCurrency) return;
       if (formData.currency_code === state.defaultCurrency) {
         setConversionPreview(null);
+        setConversionError(null);
         return;
       }
 
       setIsConverting(true);
+      setConversionError(null);
+      
       try {
         const conversion = await convertCurrency(
           parseFloat(formData.amount),
@@ -58,6 +62,7 @@ export function AddExpense() {
         });
       } catch (error) {
         console.error('Error getting conversion preview:', error);
+        setConversionError('Unable to get current exchange rate');
         setConversionPreview(null);
       } finally {
         setIsConverting(false);
@@ -188,6 +193,8 @@ export function AddExpense() {
               <option value="SGD">SGD (S$)</option>
               <option value="AUD">AUD (A$)</option>
               <option value="CAD">CAD (C$)</option>
+              <option value="CNY">CNY (¥)</option>
+              <option value="INR">INR (₹)</option>
             </select>
           </div>
           
@@ -205,6 +212,18 @@ export function AddExpense() {
                       </span>
                     </>
                   )}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Conversion Error */}
+          {conversionError && (
+            <div className="mt-3 p-3 bg-error/5 border border-error/20 rounded-lg">
+              <div className="flex items-center space-x-2 text-sm">
+                <AlertCircle size={14} className="text-error" />
+                <span className="text-error font-mono">
+                  {conversionError}
                 </span>
               </div>
             </div>
@@ -291,7 +310,7 @@ export function AddExpense() {
         <ul className="text-sm text-text-secondary font-mono space-y-2">
           <li>• Be specific with item names for better tracking</li>
           <li>• Use the original currency for accurate records</li>
-          <li>• Conversion rates are updated automatically</li>
+          <li>• Conversion rates are updated automatically from open.er-api.com</li>
           <li>• Add notes for tax-deductible or important expenses</li>
           {state.isAuthenticated && (
             <li>• Try the AI Assistant for voice expense entry</li>

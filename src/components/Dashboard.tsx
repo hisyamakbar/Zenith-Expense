@@ -4,7 +4,8 @@ import {
   TrendingDown, 
   DollarSign, 
   Calendar,
-  ArrowRight 
+  ArrowRight,
+  AlertCircle
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../contexts/AppContext';
@@ -15,6 +16,7 @@ export function Dashboard() {
   const { state } = useApp();
   const [convertedExpenses, setConvertedExpenses] = useState<any[]>([]);
   const [isConverting, setIsConverting] = useState(false);
+  const [conversionError, setConversionError] = useState<string | null>(null);
 
   // Convert all expenses to default currency
   useEffect(() => {
@@ -22,6 +24,8 @@ export function Dashboard() {
       if (!state.defaultCurrency || state.expenses.length === 0) return;
       
       setIsConverting(true);
+      setConversionError(null);
+      
       try {
         const converted = await Promise.all(
           state.expenses.map(async (expense) => {
@@ -29,18 +33,25 @@ export function Dashboard() {
               return { ...expense, convertedAmount: expense.amount };
             }
             
-            const conversion = await convertCurrency(
-              expense.amount,
-              expense.currency_code,
-              state.defaultCurrency!
-            );
-            
-            return { ...expense, convertedAmount: conversion.convertedAmount };
+            try {
+              const conversion = await convertCurrency(
+                expense.amount,
+                expense.currency_code,
+                state.defaultCurrency!
+              );
+              
+              return { ...expense, convertedAmount: conversion.convertedAmount };
+            } catch (error) {
+              console.error(`Error converting ${expense.currency_code} to ${state.defaultCurrency}:`, error);
+              // Return original amount as fallback
+              return { ...expense, convertedAmount: expense.amount };
+            }
           })
         );
         setConvertedExpenses(converted);
       } catch (error) {
         console.error('Error converting currencies:', error);
+        setConversionError('Failed to convert currencies. Showing original amounts.');
         // Fallback to original amounts
         setConvertedExpenses(state.expenses.map(exp => ({ ...exp, convertedAmount: exp.amount })));
       } finally {
@@ -139,6 +150,19 @@ export function Dashboard() {
           </div>
         )}
       </div>
+
+      {/* Conversion Error Alert */}
+      {conversionError && (
+        <div className="card border-error/20 bg-error/5">
+          <div className="flex items-center space-x-3">
+            <AlertCircle size={20} className="text-error flex-shrink-0" />
+            <div>
+              <p className="text-error font-mono font-semibold">Currency Conversion Issue</p>
+              <p className="text-text-secondary font-mono text-sm">{conversionError}</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
