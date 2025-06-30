@@ -4,7 +4,8 @@ import {
   TrendingDown, 
   DollarSign, 
   Calendar,
-  ArrowRight
+  ArrowRight,
+  Crown
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../contexts/AppContext';
@@ -95,9 +96,14 @@ export function Dashboard() {
         </div>
         {state.isAuthenticated && (
           <div className="text-right">
-            <p className="text-sm text-text-secondary font-mono">
-              {state.user?.subscription_tier === 'basic' ? 'Basic Plan' : 'Pro Plan'}
-            </p>
+            <div className="flex items-center space-x-2">
+              {state.user?.subscription_tier === 'pro' && (
+                <Crown size={16} className="text-accent" />
+              )}
+              <p className="text-sm text-text-secondary font-mono">
+                {state.user?.subscription_tier === 'basic' ? 'Basic Plan' : 'Pro Plan'}
+              </p>
+            </div>
             {state.user?.subscription_tier === 'basic' && (
               <p className="text-xs text-accent font-mono">
                 {state.user.llm_uses_today}/3 AI interactions today
@@ -232,7 +238,29 @@ export function Dashboard() {
         )}
       </div>
 
-      {/* Quick Actions */}
+      {/* Upgrade CTA */}
+      {state.isAuthenticated && state.user?.subscription_tier === 'basic' && (
+        <div className="card border-accent/20 bg-accent/5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <Crown size={24} className="text-accent" />
+              <div>
+                <h3 className="font-semibold text-text font-mono">
+                  Upgrade to Pro
+                </h3>
+                <p className="text-text-secondary font-mono text-sm">
+                  Unlock unlimited AI interactions and advanced features for just $1/month
+                </p>
+              </div>
+            </div>
+            <Link to="/upgrade" className="btn-accent">
+              Upgrade Now
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {/* Sign Up CTA */}
       {!state.isAuthenticated && (
         <div className="card border-accent/20 bg-accent/5">
           <div className="text-center">

@@ -8,8 +8,10 @@ import {
   Bell,
   Moon,
   Globe,
-  HelpCircle
+  HelpCircle,
+  Crown
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useApp } from '../contexts/AppContext';
 import { supabase } from '../lib/supabase';
 
@@ -64,9 +66,10 @@ export function Settings() {
                 </p>
               </div>
               {state.user?.subscription_tier === 'basic' && (
-                <button className="btn-accent">
-                  Upgrade to Pro
-                </button>
+                <Link to="/upgrade" className="btn-accent flex items-center space-x-2">
+                  <Crown size={16} />
+                  <span>Upgrade to Pro</span>
+                </Link>
               )}
             </div>
             
@@ -87,12 +90,56 @@ export function Settings() {
             <p className="text-text-secondary font-mono mb-4">
               Sign up to sync your data and access AI features
             </p>
-            <button className="btn-primary">
+            <Link to="/auth" className="btn-primary">
               Sign Up / Log In
-            </button>
+            </Link>
           </div>
         )}
       </div>
+
+      {/* Subscription Management */}
+      {state.isAuthenticated && (
+        <div className="card">
+          <h2 className="text-lg font-semibold text-text font-mono mb-4 flex items-center space-x-2">
+            <CreditCard size={20} />
+            <span>Subscription</span>
+          </h2>
+          
+          <div className="space-y-4">
+            <div className="flex items-center justify-between py-3 border-b border-surface-light">
+              <div>
+                <p className="font-medium text-text font-mono">Current Plan</p>
+                <p className="text-sm text-text-secondary font-mono">
+                  {state.user?.subscription_tier === 'pro' ? 'Pro Plan - $1.00/month' : 'Basic Plan - Free'}
+                </p>
+              </div>
+              {state.user?.subscription_tier === 'basic' ? (
+                <Link to="/upgrade" className="btn-accent">
+                  Upgrade
+                </Link>
+              ) : (
+                <button className="btn-secondary">
+                  Manage Billing
+                </button>
+              )}
+            </div>
+            
+            {state.user?.subscription_tier === 'basic' && (
+              <div className="flex items-center justify-between py-3">
+                <div>
+                  <p className="font-medium text-text font-mono">AI Usage Today</p>
+                  <p className="text-sm text-text-secondary font-mono">
+                    {state.user.llm_uses_today}/3 interactions used
+                  </p>
+                </div>
+                <Link to="/upgrade" className="text-accent hover:text-accent/80 font-mono text-sm">
+                  Get Unlimited →
+                </Link>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Preferences Section */}
       <div className="card">

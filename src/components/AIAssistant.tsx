@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Bot, Send, Lock, Sparkles } from 'lucide-react';
+import { Bot, Send, Lock, Sparkles, Crown } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../contexts/AppContext';
 
@@ -91,9 +91,10 @@ export function AIAssistant() {
             You've used all 3 AI interactions for today. Upgrade to Pro for unlimited daily interactions and advanced features.
           </p>
           <div className="space-y-3">
-            <button className="btn-accent w-full">
-              Upgrade to Pro - Free During Hackathon!
-            </button>
+            <Link to="/upgrade" className="btn-accent w-full flex items-center justify-center space-x-2">
+              <Crown size={16} />
+              <span>Upgrade to Pro - $1/month</span>
+            </Link>
             <p className="text-xs text-text-muted font-mono">
               Resets daily at 00:00 UTC
             </p>
@@ -119,16 +120,26 @@ export function AIAssistant() {
           </div>
         </div>
         
-        {state.user?.subscription_tier === 'basic' && (
-          <div className="text-right">
+        <div className="text-right">
+          <div className="flex items-center space-x-2">
+            {state.user?.subscription_tier === 'pro' && (
+              <Crown size={16} className="text-accent" />
+            )}
             <p className="text-sm font-mono text-text-secondary">
-              {state.user.llm_uses_today}/3 interactions today
+              {state.user?.subscription_tier === 'pro' ? 'Pro Plan' : 'Basic Plan'}
             </p>
-            <Link to="/upgrade" className="text-xs text-accent hover:text-accent/80 font-mono">
-              Upgrade for unlimited
-            </Link>
           </div>
-        )}
+          {state.user?.subscription_tier === 'basic' && (
+            <div className="flex items-center space-x-2">
+              <p className="text-xs font-mono text-text-secondary">
+                {state.user.llm_uses_today}/3 interactions today
+              </p>
+              <Link to="/upgrade" className="text-xs text-accent hover:text-accent/80 font-mono">
+                Upgrade
+              </Link>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Messages */}
