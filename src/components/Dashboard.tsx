@@ -4,7 +4,8 @@ import {
   TrendingDown, 
   DollarSign, 
   Calendar,
-  ArrowRight
+  ArrowRight,
+  Crown
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../contexts/AppContext';
@@ -95,9 +96,14 @@ export function Dashboard() {
         </div>
         {state.isAuthenticated && (
           <div className="text-right">
-            <p className="text-sm text-text-secondary font-mono">
-              {state.user?.subscription_tier === 'basic' ? 'Basic Plan' : 'Pro Plan'}
-            </p>
+            <div className="flex items-center space-x-2">
+              {state.user?.subscription_tier === 'pro' && (
+                <Crown size={16} className="text-accent" />
+              )}
+              <p className="text-sm text-text-secondary font-mono">
+                {state.user?.subscription_tier === 'basic' ? 'Basic Plan' : 'Pro Plan'}
+              </p>
+            </div>
             {state.user?.subscription_tier === 'basic' && (
               <p className="text-xs text-accent font-mono">
                 {state.user.llm_uses_today}/3 AI interactions today
@@ -232,7 +238,7 @@ export function Dashboard() {
         )}
       </div>
 
-      {/* Quick Actions */}
+      {/* Upgrade CTA */}
       {!state.isAuthenticated && (
         <div className="card border-accent/20 bg-accent/5">
           <div className="text-center">
@@ -244,6 +250,26 @@ export function Dashboard() {
             </p>
             <Link to="/auth" className="btn-accent">
               Sign Up Now
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {/* Pro Upgrade CTA for Basic Users */}
+      {state.isAuthenticated && state.user?.subscription_tier === 'basic' && (
+        <div className="card border-primary/20 bg-primary/5">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-semibold text-text font-mono mb-2 flex items-center space-x-2">
+                <Crown size={20} className="text-accent" />
+                <span>Upgrade to Pro</span>
+              </h3>
+              <p className="text-text-secondary font-mono text-sm">
+                Get unlimited AI interactions, advanced analytics, and premium features.
+              </p>
+            </div>
+            <Link to="/upgrade" className="btn-accent">
+              Upgrade Now
             </Link>
           </div>
         </div>

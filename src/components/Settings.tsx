@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   User, 
   CreditCard, 
@@ -8,13 +8,44 @@ import {
   Bell,
   Moon,
   Globe,
-  HelpCircle
+  HelpCircle,
+  ExternalLink,
+  Crown
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useApp } from '../contexts/AppContext';
 import { supabase } from '../lib/supabase';
 
 export function Settings() {
   const { state, dispatch } = useApp();
+  const [subscriptionData, setSubscriptionData] = useState<any>(null);
+  const [isLoadingSubscription, setIsLoadingSubscription] = useState(false);
+
+  useEffect(() => {
+    const fetchSubscriptionData = async () => {
+      if (!state.isAuthenticated) return;
+
+      setIsLoadingSubscription(true);
+      try {
+        const { data, error } = await supabase
+          .from('stripe_user_subscriptions')
+          .select('*')
+          .maybeSingle();
+
+        if (error) {
+          console.error('Error fetching subscription:', error);
+        } else {
+          setSubscriptionData(data);
+        }
+      } catch (error) {
+        console.error('Error fetching subscription data:', error);
+      } finally {
+        setIsLoadingSubscription(false);
+      }
+    };
+
+    fetchSubscriptionData();
+  }, [state.isAuthenticated]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -61,12 +92,19 @@ export function Settings() {
                 <p className="font-medium text-text font-mono">Subscription</p>
                 <p className="text-sm text-text-secondary font-mono">
                   {state.user?.subscription_tier === 'pro' ? 'Pro Plan' : 'Basic Plan'}
+                  {isLoadingSubscription && ' (Loading...)'}
                 </p>
+                {subscriptionData && subscriptionData.subscription_status && (
+                  <p className="text-xs text-text-muted font-mono">
+                    Status: {subscriptionData.subscription_status}
+                  </p>
+                )}
               </div>
               {state.user?.subscription_tier === 'basic' && (
-                <button className="btn-accent">
-                  Upgrade to Pro
-                </button>
+                <Link to="/upgrade" className="btn-accent flex items-center space-x-2">
+                  <Crown size={16} />
+                  <span>Upgrade to Pro</span>
+                </Link>
               )}
             </div>
             
@@ -81,15 +119,49 @@ export function Settings() {
                 Cannot be changed
               </p>
             </div>
+
+            {/* Subscription Details */}
+            {subscriptionData && state.user?.subscription_tier === 'pro' && (
+              <div className="card border-primary/20 bg-primary/5">
+                <h3 className="font-semibold text-text font-mono mb-3 flex items-center space-x-2">
+                  <CreditCard size={16} />
+                  <span>Subscription Details</span>
+                </h3>
+                <div className="space-y-2 text-sm">
+                  {subscriptionData.current_period_end && (
+                    <div className="flex justify-between">
+                      <span className="text-text-secondary font-mono">Next Billing:</span>
+                      <span className="text-text font-mono">
+                        {new Date(subscriptionData.current_period_end * 1000).toLocaleDateString()}
+                      </span>
+                    </div>
+                  )}
+                  {subscriptionData.payment_method_brand && subscriptionData.payment_method_last4 && (
+                    <div className="flex justify-between">
+                      <span className="text-text-secondary font-mono">Payment Method:</span>
+                      <span className="text-text font-mono">
+                        {subscriptionData.payment_method_brand.toUpperCase()} ****{subscriptionData.payment_method_last4}
+                      </span>
+                    </div>
+                  )}
+                  {subscriptionData.cancel_at_period_end && (
+                    <div className="flex justify-between">
+                      <span className="text-text-secondary font-mono">Status:</span>
+                      <span className="text-error font-mono">Cancels at period end</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div className="text-center py-6">
             <p className="text-text-secondary font-mono mb-4">
               Sign up to sync your data and access AI features
             </p>
-            <button className="btn-primary">
+            <Link to="/auth" className="btn-primary">
               Sign Up / Log In
-            </button>
+            </Link>
           </div>
         )}
       </div>

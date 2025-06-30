@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Plus, Edit, Trash2, FolderOpen, Lock } from 'lucide-react';
+import { Plus, Edit, Trash2, FolderOpen, Lock, Crown } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useApp } from '../contexts/AppContext';
 
 const DEFAULT_CATEGORIES = [
@@ -99,9 +100,16 @@ export function Categories() {
                 }
               </p>
             </div>
-            <button className="btn-accent">
-              {state.isAuthenticated ? 'Upgrade to Pro' : 'Sign Up'}
-            </button>
+            {state.isAuthenticated ? (
+              <Link to="/upgrade" className="btn-accent flex items-center space-x-2">
+                <Crown size={16} />
+                <span>Upgrade to Pro</span>
+              </Link>
+            ) : (
+              <Link to="/auth" className="btn-accent">
+                Sign Up
+              </Link>
+            )}
           </div>
         </div>
       )}
