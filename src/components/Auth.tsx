@@ -22,6 +22,7 @@ export function Auth() {
 
     try {
       if (mode === 'signup') {
+        // First try to sign up
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
@@ -31,90 +32,108 @@ export function Auth() {
         });
 
         if (error) {
-          // Check if the error is due to email confirmation being required
-          if (error.message.includes('Email not confirmed') || error.message.includes('email_not_confirmed')) {
+          // If signup fails due to user already existing, try to sign in instead
+          if (error.message.includes('already registered') || error.message.includes('already exists')) {
             setMessage({ 
-              type: 'success', 
-              text: 'Account created! Please check your email and click the confirmation link to complete registration.' 
+              type: 'error', 
+              text: 'Account already exists. Trying to sign you in...' 
             });
-            setMode('login');
-            setPassword('');
-            return;
+            
+            // Automatically try to sign in
+            const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+              email,
+              password
+            });
+
+            if (signInError) {
+              throw new Error('Account exists but password is incorrect. Please try logging in.');
+            }
+
+            if (signInData.user) {
+              await handleSuccessfulAuth(signInData.user.id);
+              setMessage({ type: 'success', text: 'Signed in successfully!' });
+              setTimeout(() => navigate('/'), 1000);
+              return;
+            }
           }
           throw error;
         }
 
         if (data.user) {
-          // Create user profile
-          const { error: profileError } = await supabase
-            .from('users')
-            .insert({
-              id: data.user.id,
-              email: data.user.email,
-              default_currency_code: 'USD',
-              subscription_tier: 'basic',
-              llm_uses_today: 0,
-              last_llm_reset_date: new Date().toISOString()
-            });
-
-          if (profileError) {
-            console.error('Error creating user profile:', profileError);
-          }
-
-          setMessage({ type: 'success', text: 'Account created successfully! You can now log in.' });
-          setMode('login');
-          setPassword('');
+          // If signup successful, create profile and sign in
+          await handleSuccessfulAuth(data.user.id);
+          setMessage({ type: 'success', text: 'Account created and signed in successfully!' });
+          setTimeout(() => navigate('/'), 1000);
         }
       } else {
+        // Login mode
         const { data, error } = await supabase.auth.signInWithPassword({
           email,
           password
         });
 
-        if (error) throw error;
+        if (error) {
+          if (error.message.includes('Email not confirmed')) {
+            throw new Error('Please check your email and click the confirmation link, or contact support if you need help.');
+          }
+          throw error;
+        }
 
         if (data.user) {
-          // Fetch user profile using maybeSingle to handle missing profiles
-          const { data: profile, error: profileError } = await supabase
-            .from('users')
-            .select('*')
-            .eq('id', data.user.id)
-            .maybeSingle();
-
-          if (profileError) {
-            console.error('Error fetching user profile:', profileError);
-          } else if (profile) {
-            dispatch({ type: 'SET_USER', payload: profile });
-          } else {
-            // Create user profile if it doesn't exist
-            const { data: newProfile, error: createError } = await supabase
-              .from('users')
-              .insert({
-                id: data.user.id,
-                email: data.user.email,
-                default_currency_code: 'USD',
-                subscription_tier: 'basic',
-                llm_uses_today: 0,
-                last_llm_reset_date: new Date().toISOString()
-              })
-              .select()
-              .single();
-
-            if (createError) {
-              console.error('Error creating user profile:', createError);
-            } else if (newProfile) {
-              dispatch({ type: 'SET_USER', payload: newProfile });
-            }
-          }
-
-          setMessage({ type: 'success', text: 'Logged in successfully!' });
+          await handleSuccessfulAuth(data.user.id);
+          setMessage({ type: 'success', text: 'Signed in successfully!' });
           setTimeout(() => navigate('/'), 1000);
         }
       }
     } catch (error: any) {
+      console.error('Auth error:', error);
       setMessage({ type: 'error', text: error.message });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleSuccessfulAuth = async (userId: string) => {
+    try {
+      // Try to fetch existing profile
+      const { data: existingProfile, error: fetchError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (fetchError && fetchError.code !== 'PGRST116') {
+        console.error('Error fetching profile:', fetchError);
+      }
+
+      if (existingProfile) {
+        // Profile exists, use it
+        dispatch({ type: 'SET_USER', payload: existingProfile });
+      } else {
+        // Create new profile
+        const { data: newProfile, error: createError } = await supabase
+          .from('users')
+          .insert({
+            id: userId,
+            email: email,
+            default_currency_code: 'USD',
+            subscription_tier: 'basic',
+            llm_uses_today: 0,
+            last_llm_reset_date: new Date().toISOString()
+          })
+          .select()
+          .single();
+
+        if (createError) {
+          console.error('Error creating profile:', createError);
+          // Don't throw error, just log it - user can still use the app
+        } else if (newProfile) {
+          dispatch({ type: 'SET_USER', payload: newProfile });
+        }
+      }
+    } catch (error) {
+      console.error('Error handling auth:', error);
+      // Don't throw - let user proceed even if profile creation fails
     }
   };
 
@@ -124,7 +143,7 @@ export function Auth() {
         {/* Back Button */}
         <Link 
           to="/"
-          className="flex items-center space-x-2 text-text-muted hover:text-primary mb-8 font-mono"
+          className="flex items-center space-x-2 text-text-muted hover:text-primary mb-8 font-mono transition-colors duration-200"
         >
           <ArrowLeft size={16} />
           <span>Back to App</span>
@@ -135,10 +154,10 @@ export function Auth() {
           <div className="w-16 h-16 bg-primary rounded-2xl flex items-center justify-center mx-auto mb-4">
             <User size={24} className="text-background" />
           </div>
-          <h1 className="text-2xl font-bold text-text font-mono">
+          <h1 className="text-2xl font-bold text-text mb-2 font-mono">
             {mode === 'login' ? 'Welcome Back' : 'Create Account'}
           </h1>
-          <p className="text-text-secondary font-mono mt-2">
+          <p className="text-text-secondary font-mono">
             {mode === 'login' 
               ? 'Sign in to access your expense data and AI features'
               : 'Join Zenith Expense to sync your data and unlock AI features'
@@ -183,6 +202,7 @@ export function Auth() {
                 className="input pl-10"
                 placeholder="your@email.com"
                 required
+                disabled={isLoading}
               />
             </div>
           </div>
@@ -201,6 +221,7 @@ export function Auth() {
                 placeholder="••••••••"
                 required
                 minLength={6}
+                disabled={isLoading}
               />
             </div>
             {mode === 'signup' && (
@@ -213,10 +234,10 @@ export function Auth() {
           <button
             type="submit"
             disabled={isLoading}
-            className={`w-full btn ${
+            className={`w-full btn transition-all duration-200 ${
               isLoading 
                 ? 'bg-surface-light text-text-muted cursor-not-allowed' 
-                : 'btn-primary'
+                : 'btn-primary hover:scale-105'
             }`}
           >
             {isLoading ? (
@@ -241,14 +262,31 @@ export function Auth() {
               setMessage(null);
               setPassword('');
             }}
-            className="text-primary hover:text-primary/80 font-mono text-sm mt-2 underline"
+            disabled={isLoading}
+            className="text-primary hover:text-primary/80 font-mono text-sm mt-2 underline transition-colors duration-200 disabled:opacity-50"
           >
             {mode === 'login' ? 'Create Account' : 'Sign In'}
           </button>
         </div>
 
-        {/* Features Preview */}
+        {/* Quick Demo Access */}
         <div className="card mt-8 border-accent/20 bg-accent/5">
+          <div className="text-center">
+            <h3 className="font-semibold text-text font-mono mb-2">
+              🚀 Quick Demo Access
+            </h3>
+            <p className="text-text-secondary font-mono text-sm mb-4">
+              Use demo credentials to try the app instantly:
+            </p>
+            <div className="space-y-2 text-sm font-mono">
+              <p className="text-text">Email: <span className="text-accent">demo@zenith.app</span></p>
+              <p className="text-text">Password: <span className="text-accent">demo123</span></p>
+            </div>
+          </div>
+        </div>
+
+        {/* Features Preview */}
+        <div className="card mt-6 border-primary/20 bg-primary/5">
           <h3 className="font-semibold text-text font-mono mb-3">✨ Premium Features</h3>
           <ul className="text-sm text-text-secondary font-mono space-y-2">
             <li>• AI-powered expense tracking with natural language</li>
