@@ -306,7 +306,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (data) {
         dispatch({ type: 'SET_USER', payload: data });
       } else {
-        // User profile doesn't exist, create it
+        // User profile doesn't exist, this shouldn't happen with the trigger
+        // but let's create it as a fallback
         console.log('User profile not found, creating new profile...');
         const { data: authUser } = await supabase.auth.getUser();
         

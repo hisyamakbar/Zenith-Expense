@@ -29,17 +29,28 @@ export function Auth() {
 
         if (error) throw error;
 
-        if (data.user) {
-          // Check if user profile already exists (in case of trigger failure)
-          const { data: existingProfile } = await supabase
+        if (data.user && data.session) {
+          // Email confirmation is disabled, user is automatically signed in
+          setMessage({ type: 'success', text: 'Account created successfully! You are now logged in.' });
+          
+          // The database trigger should have created the user profile automatically
+          // Let's fetch it to make sure
+          const { data: profile, error: profileError } = await supabase
             .from('users')
             .select('*')
             .eq('id', data.user.id)
             .maybeSingle();
 
-          // Only create profile if it doesn't exist (trigger should handle this automatically)
-          if (!existingProfile) {
-            const { error: profileError } = await supabase
+          if (profileError) {
+            console.error('Error fetching user profile:', profileError);
+          }
+
+          if (profile) {
+            dispatch({ type: 'SET_USER', payload: profile });
+          } else {
+            // Fallback: create profile if trigger didn't work
+            console.log('Creating user profile as fallback...');
+            const { data: newProfile, error: createError } = await supabase
               .from('users')
               .insert({
                 id: data.user.id,
@@ -48,38 +59,25 @@ export function Auth() {
                 subscription_tier: 'basic',
                 llm_uses_today: 0,
                 last_llm_reset_date: new Date().toISOString().split('T')[0]
-              });
-
-            if (profileError) {
-              console.error('Error creating user profile:', profileError);
-              // Don't throw here, as the user might still be created successfully
-            }
-          }
-
-          // If email confirmation is required, show appropriate message
-          if (!data.session) {
-            setMessage({ 
-              type: 'success', 
-              text: 'Account created! Please check your email to confirm your account before signing in.' 
-            });
-            setMode('login');
-          } else {
-            // User is automatically signed in (email confirmation disabled)
-            setMessage({ type: 'success', text: 'Account created successfully! You are now logged in.' });
-            
-            // Fetch the user profile
-            const { data: profile } = await supabase
-              .from('users')
-              .select('*')
-              .eq('id', data.user.id)
+              })
+              .select()
               .single();
 
-            if (profile) {
-              dispatch({ type: 'SET_USER', payload: profile });
+            if (createError) {
+              console.error('Error creating user profile:', createError);
+            } else if (newProfile) {
+              dispatch({ type: 'SET_USER', payload: newProfile });
             }
-
-            setTimeout(() => navigate('/'), 1500);
           }
+
+          setTimeout(() => navigate('/'), 1500);
+        } else if (data.user && !data.session) {
+          // This shouldn't happen if email confirmation is disabled, but handle it just in case
+          setMessage({ 
+            type: 'error', 
+            text: 'Account created but automatic sign-in failed. Please try signing in manually.' 
+          });
+          setMode('login');
         }
       } else {
         const { data, error } = await supabase.auth.signInWithPassword({
@@ -89,7 +87,7 @@ export function Auth() {
 
         if (error) throw error;
 
-        if (data.user) {
+        if (data.user && data.session) {
           // Fetch user profile
           const { data: profile, error: profileError } = await supabase
             .from('users')
@@ -99,11 +97,14 @@ export function Auth() {
 
           if (profileError) {
             console.error('Error fetching user profile:', profileError);
-          } else if (profile) {
+          }
+
+          if (profile) {
             dispatch({ type: 'SET_USER', payload: profile });
           } else {
-            // Profile doesn't exist, create it
-            const { error: createError } = await supabase
+            // Profile doesn't exist, create it (shouldn't happen with trigger, but fallback)
+            console.log('Creating missing user profile...');
+            const { data: newProfile, error: createError } = await supabase
               .from('users')
               .insert({
                 id: data.user.id,
@@ -112,19 +113,14 @@ export function Auth() {
                 subscription_tier: 'basic',
                 llm_uses_today: 0,
                 last_llm_reset_date: new Date().toISOString().split('T')[0]
-              });
+              })
+              .select()
+              .single();
 
-            if (!createError) {
-              // Fetch the newly created profile
-              const { data: newProfile } = await supabase
-                .from('users')
-                .select('*')
-                .eq('id', data.user.id)
-                .single();
-
-              if (newProfile) {
-                dispatch({ type: 'SET_USER', payload: newProfile });
-              }
+            if (createError) {
+              console.error('Error creating user profile:', createError);
+            } else if (newProfile) {
+              dispatch({ type: 'SET_USER', payload: newProfile });
             }
           }
 
@@ -136,15 +132,21 @@ export function Auth() {
       console.error('Authentication error:', error);
       
       // Handle specific error cases
-      if (error.message?.includes('email_not_confirmed')) {
-        setMessage({ 
-          type: 'error', 
-          text: 'Please check your email and click the confirmation link before signing in.' 
-        });
-      } else if (error.message?.includes('Invalid login credentials')) {
+      if (error.message?.includes('Invalid login credentials')) {
         setMessage({ 
           type: 'error', 
           text: 'Invalid email or password. Please check your credentials and try again.' 
+        });
+      } else if (error.message?.includes('User already registered')) {
+        setMessage({ 
+          type: 'error', 
+          text: 'An account with this email already exists. Please sign in instead.' 
+        });
+        setMode('login');
+      } else if (error.message?.includes('Password should be at least')) {
+        setMessage({ 
+          type: 'error', 
+          text: 'Password must be at least 6 characters long.' 
         });
       } else {
         setMessage({ type: 'error', text: error.message || 'An unexpected error occurred.' });
@@ -290,7 +292,7 @@ export function Auth() {
             <li>• Multi-currency support with real-time conversion</li>
             <li>• Cloud sync across all your devices</li>
             <li>• Advanced analytics and spending insights</li>
-            <li>• Unlimited custom categories</li>
+            <li>• Unlimited custom categories (Pro plan)</li>
           </ul>
         </div>
       </div>
