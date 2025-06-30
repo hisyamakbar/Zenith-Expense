@@ -15,145 +15,177 @@ export function Auth() {
   const navigate = useNavigate();
   const { dispatch } = useApp();
 
+  const createUserProfile = async (userId: string, userEmail: string) => {
+    try {
+      const { data: existingProfile } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (existingProfile) {
+        return existingProfile;
+      }
+
+      const { data: newProfile, error: createError } = await supabase
+        .from('users')
+        .insert({
+          id: userId,
+          email: userEmail,
+          default_currency_code: 'USD',
+          subscription_tier: 'basic',
+          llm_uses_today: 0,
+          last_llm_reset_date: new Date().toISOString().split('T')[0]
+        })
+        .select()
+        .single();
+
+      if (createError) {
+        console.error('Error creating user profile:', createError);
+        throw createError;
+      }
+
+      return newProfile;
+    } catch (error) {
+      console.error('Error in createUserProfile:', error);
+      throw error;
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setMessage(null);
 
+    // Basic validation
+    if (!email.trim() || !password.trim()) {
+      setMessage({ type: 'error', text: 'Please fill in all fields.' });
+      setIsLoading(false);
+      return;
+    }
+
+    if (password.length < 6) {
+      setMessage({ type: 'error', text: 'Password must be at least 6 characters long.' });
+      setIsLoading(false);
+      return;
+    }
+
     try {
       if (mode === 'signup') {
-        const { data, error } = await supabase.auth.signUp({
-          email,
+        // Sign up new user
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+          email: email.trim(),
           password,
+          options: {
+            emailRedirectTo: undefined // Disable email confirmation redirect
+          }
         });
 
-        if (error) throw error;
+        if (signUpError) {
+          throw signUpError;
+        }
 
-        if (data.user && data.session) {
-          // Email confirmation is disabled, user is automatically signed in
-          setMessage({ type: 'success', text: 'Account created successfully! You are now logged in.' });
-          
-          // The database trigger should have created the user profile automatically
-          // Let's fetch it to make sure
-          const { data: profile, error: profileError } = await supabase
-            .from('users')
-            .select('*')
-            .eq('id', data.user.id)
-            .maybeSingle();
+        if (!signUpData.user) {
+          throw new Error('Failed to create user account');
+        }
 
-          if (profileError) {
-            console.error('Error fetching user profile:', profileError);
-          }
-
-          if (profile) {
-            dispatch({ type: 'SET_USER', payload: profile });
-          } else {
-            // Fallback: create profile if trigger didn't work
-            console.log('Creating user profile as fallback...');
-            const { data: newProfile, error: createError } = await supabase
-              .from('users')
-              .insert({
-                id: data.user.id,
-                email: data.user.email,
-                default_currency_code: 'USD',
-                subscription_tier: 'basic',
-                llm_uses_today: 0,
-                last_llm_reset_date: new Date().toISOString().split('T')[0]
-              })
-              .select()
-              .single();
-
-            if (createError) {
-              console.error('Error creating user profile:', createError);
-            } else if (newProfile) {
-              dispatch({ type: 'SET_USER', payload: newProfile });
-            }
-          }
-
-          setTimeout(() => navigate('/'), 1500);
-        } else if (data.user && !data.session) {
-          // This shouldn't happen if email confirmation is disabled, but handle it just in case
+        // Check if user needs email confirmation
+        if (!signUpData.session && signUpData.user && !signUpData.user.email_confirmed_at) {
           setMessage({ 
             type: 'error', 
-            text: 'Account created but automatic sign-in failed. Please try signing in manually.' 
+            text: 'Please check your email and click the confirmation link before signing in.' 
+          });
+          setMode('login');
+          setIsLoading(false);
+          return;
+        }
+
+        // If we have a session, the user is automatically signed in
+        if (signUpData.session && signUpData.user) {
+          try {
+            const profile = await createUserProfile(signUpData.user.id, signUpData.user.email || email);
+            dispatch({ type: 'SET_USER', payload: profile });
+            setMessage({ type: 'success', text: 'Account created successfully! Redirecting...' });
+            setTimeout(() => navigate('/'), 1500);
+          } catch (profileError) {
+            console.error('Profile creation error:', profileError);
+            setMessage({ 
+              type: 'error', 
+              text: 'Account created but there was an issue setting up your profile. Please try signing in.' 
+            });
+            setMode('login');
+          }
+        } else {
+          setMessage({ 
+            type: 'success', 
+            text: 'Account created! Please check your email for confirmation, then sign in.' 
           });
           setMode('login');
         }
       } else {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email,
+        // Sign in existing user
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
           password,
         });
 
-        if (error) throw error;
+        if (signInError) {
+          throw signInError;
+        }
 
-        if (data.user && data.session) {
-          // Fetch user profile
-          const { data: profile, error: profileError } = await supabase
-            .from('users')
-            .select('*')
-            .eq('id', data.user.id)
-            .maybeSingle();
+        if (!signInData.user || !signInData.session) {
+          throw new Error('Failed to sign in');
+        }
 
-          if (profileError) {
-            console.error('Error fetching user profile:', profileError);
-          }
-
-          if (profile) {
-            dispatch({ type: 'SET_USER', payload: profile });
-          } else {
-            // Profile doesn't exist, create it (shouldn't happen with trigger, but fallback)
-            console.log('Creating missing user profile...');
-            const { data: newProfile, error: createError } = await supabase
-              .from('users')
-              .insert({
-                id: data.user.id,
-                email: data.user.email,
-                default_currency_code: 'USD',
-                subscription_tier: 'basic',
-                llm_uses_today: 0,
-                last_llm_reset_date: new Date().toISOString().split('T')[0]
-              })
-              .select()
-              .single();
-
-            if (createError) {
-              console.error('Error creating user profile:', createError);
-            } else if (newProfile) {
-              dispatch({ type: 'SET_USER', payload: newProfile });
-            }
-          }
-
-          setMessage({ type: 'success', text: 'Logged in successfully!' });
+        // Fetch or create user profile
+        try {
+          const profile = await createUserProfile(signInData.user.id, signInData.user.email || email);
+          dispatch({ type: 'SET_USER', payload: profile });
+          setMessage({ type: 'success', text: 'Signed in successfully! Redirecting...' });
+          setTimeout(() => navigate('/'), 1500);
+        } catch (profileError) {
+          console.error('Profile fetch/creation error:', profileError);
+          // Still allow sign in even if profile creation fails
+          setMessage({ type: 'success', text: 'Signed in successfully! Redirecting...' });
           setTimeout(() => navigate('/'), 1500);
         }
       }
     } catch (error: any) {
       console.error('Authentication error:', error);
       
-      // Handle specific error cases
+      // Handle specific error cases with more user-friendly messages
+      let errorMessage = 'An unexpected error occurred. Please try again.';
+      
       if (error.message?.includes('Invalid login credentials')) {
-        setMessage({ 
-          type: 'error', 
-          text: 'Invalid email or password. Please check your credentials and try again.' 
-        });
+        errorMessage = mode === 'login' 
+          ? 'Invalid email or password. Please check your credentials and try again.'
+          : 'Unable to create account. Please check your email and password.';
       } else if (error.message?.includes('User already registered')) {
-        setMessage({ 
-          type: 'error', 
-          text: 'An account with this email already exists. Please sign in instead.' 
-        });
+        errorMessage = 'An account with this email already exists. Please sign in instead.';
         setMode('login');
       } else if (error.message?.includes('Password should be at least')) {
-        setMessage({ 
-          type: 'error', 
-          text: 'Password must be at least 6 characters long.' 
-        });
-      } else {
-        setMessage({ type: 'error', text: error.message || 'An unexpected error occurred.' });
+        errorMessage = 'Password must be at least 6 characters long.';
+      } else if (error.message?.includes('Unable to validate email address')) {
+        errorMessage = 'Please enter a valid email address.';
+      } else if (error.message?.includes('Email not confirmed')) {
+        errorMessage = 'Please check your email and click the confirmation link before signing in.';
+      } else if (error.message?.includes('Too many requests')) {
+        errorMessage = 'Too many attempts. Please wait a moment before trying again.';
+      } else if (error.message) {
+        errorMessage = error.message;
       }
+      
+      setMessage({ type: 'error', text: errorMessage });
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleModeSwitch = () => {
+    setMode(mode === 'login' ? 'signup' : 'login');
+    setMessage(null);
+    setEmail('');
+    setPassword('');
   };
 
   return (
@@ -162,7 +194,7 @@ export function Auth() {
         {/* Back Button */}
         <Link 
           to="/"
-          className="flex items-center space-x-2 text-text-muted hover:text-primary mb-8 font-mono"
+          className="flex items-center space-x-2 text-text-muted hover:text-primary mb-8 font-mono transition-colors"
         >
           <ArrowLeft size={16} />
           <span>Back to App</span>
@@ -221,6 +253,8 @@ export function Auth() {
                 className="input pl-10"
                 placeholder="your@email.com"
                 required
+                disabled={isLoading}
+                autoComplete={mode === 'login' ? 'email' : 'username'}
               />
             </div>
           </div>
@@ -239,6 +273,8 @@ export function Auth() {
                 placeholder="••••••••"
                 required
                 minLength={6}
+                disabled={isLoading}
+                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
               />
             </div>
             {mode === 'signup' && (
@@ -250,11 +286,11 @@ export function Auth() {
 
           <button
             type="submit"
-            disabled={isLoading}
-            className={`w-full btn ${
-              isLoading 
+            disabled={isLoading || !email.trim() || !password.trim()}
+            className={`w-full btn transition-all duration-200 ${
+              isLoading || !email.trim() || !password.trim()
                 ? 'bg-surface-light text-text-muted cursor-not-allowed' 
-                : 'btn-primary'
+                : 'btn-primary hover:scale-[1.02]'
             }`}
           >
             {isLoading ? (
@@ -274,11 +310,9 @@ export function Auth() {
             {mode === 'login' ? "Don't have an account?" : 'Already have an account?'}
           </p>
           <button
-            onClick={() => {
-              setMode(mode === 'login' ? 'signup' : 'login');
-              setMessage(null);
-            }}
-            className="text-primary hover:text-primary/80 font-mono text-sm mt-1"
+            onClick={handleModeSwitch}
+            disabled={isLoading}
+            className="text-primary hover:text-primary/80 font-mono text-sm mt-1 transition-colors disabled:opacity-50"
           >
             {mode === 'login' ? 'Create Account' : 'Sign In'}
           </button>
