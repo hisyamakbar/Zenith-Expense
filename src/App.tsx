@@ -10,6 +10,9 @@ import { AIAssistant } from './components/AIAssistant';
 import { Categories } from './components/Categories';
 import { Settings } from './components/Settings';
 import { AddExpense } from './components/AddExpense';
+import { Auth } from './components/Auth';
+import { Upgrade } from './components/Upgrade';
+import { SubscriptionSuccess } from './components/SubscriptionSuccess';
 
 function AppContent() {
   const [showSplash, setShowSplash] = useState(true);
@@ -34,6 +37,9 @@ function AppContent() {
   return (
     <Router>
       <Routes>
+        <Route path="/auth" element={<Auth />} />
+        <Route path="/upgrade" element={<Upgrade />} />
+        <Route path="/subscription-success" element={<SubscriptionSuccess />} />
         <Route path="/" element={<Layout />}>
           <Route index element={<Dashboard />} />
           <Route path="transactions" element={<Transactions />} />
