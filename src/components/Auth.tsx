@@ -17,6 +17,7 @@ export function Auth() {
 
   const createUserProfile = async (userId: string, userEmail: string) => {
     try {
+      // First check if profile already exists
       const { data: existingProfile } = await supabase
         .from('users')
         .select('*')
@@ -27,6 +28,7 @@ export function Auth() {
         return existingProfile;
       }
 
+      // Create new profile
       const { data: newProfile, error: createError } = await supabase
         .from('users')
         .insert({
@@ -92,8 +94,8 @@ export function Auth() {
         // Check if user needs email confirmation
         if (!signUpData.session && signUpData.user && !signUpData.user.email_confirmed_at) {
           setMessage({ 
-            type: 'error', 
-            text: 'Please check your email and click the confirmation link before signing in.' 
+            type: 'success', 
+            text: 'Account created! Please check your email for confirmation, then sign in.' 
           });
           setMode('login');
           setIsLoading(false);
@@ -106,7 +108,11 @@ export function Auth() {
             const profile = await createUserProfile(signUpData.user.id, signUpData.user.email || email);
             dispatch({ type: 'SET_USER', payload: profile });
             setMessage({ type: 'success', text: 'Account created successfully! Redirecting...' });
-            setTimeout(() => navigate('/'), 1500);
+            
+            // Small delay to show success message
+            setTimeout(() => {
+              navigate('/');
+            }, 1000);
           } catch (profileError) {
             console.error('Profile creation error:', profileError);
             setMessage({ 
@@ -137,18 +143,14 @@ export function Auth() {
           throw new Error('Failed to sign in');
         }
 
-        // Fetch or create user profile
-        try {
-          const profile = await createUserProfile(signInData.user.id, signInData.user.email || email);
-          dispatch({ type: 'SET_USER', payload: profile });
-          setMessage({ type: 'success', text: 'Signed in successfully! Redirecting...' });
-          setTimeout(() => navigate('/'), 1500);
-        } catch (profileError) {
-          console.error('Profile fetch/creation error:', profileError);
-          // Still allow sign in even if profile creation fails
-          setMessage({ type: 'success', text: 'Signed in successfully! Redirecting...' });
-          setTimeout(() => navigate('/'), 1500);
-        }
+        // The AppContext will handle fetching/creating the user profile
+        // via the auth state change listener
+        setMessage({ type: 'success', text: 'Signed in successfully! Redirecting...' });
+        
+        // Small delay to show success message
+        setTimeout(() => {
+          navigate('/');
+        }, 1000);
       }
     } catch (error: any) {
       console.error('Authentication error:', error);
@@ -171,6 +173,8 @@ export function Auth() {
         errorMessage = 'Please check your email and click the confirmation link before signing in.';
       } else if (error.message?.includes('Too many requests')) {
         errorMessage = 'Too many attempts. Please wait a moment before trying again.';
+      } else if (error.message?.includes('signup is disabled')) {
+        errorMessage = 'New registrations are currently disabled. Please contact support.';
       } else if (error.message) {
         errorMessage = error.message;
       }

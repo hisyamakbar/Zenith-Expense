@@ -260,55 +260,82 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(appReducer, initialState);
 
   useEffect(() => {
-    // Check if user has selected a default currency
-    const hasSelected = localStorage.getItem('hasSelectedCurrency');
-    const defaultCurrency = localStorage.getItem('defaultCurrency');
-    
-    if (hasSelected && defaultCurrency) {
-      dispatch({ type: 'SET_HAS_SELECTED_CURRENCY', payload: true });
-      dispatch({ type: 'SET_DEFAULT_CURRENCY', payload: defaultCurrency });
-    }
+    let mounted = true;
 
-    // Initialize auth state
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        // Fetch user profile
-        fetchUserProfile(session.user.id);
+    const initializeApp = async () => {
+      try {
+        // Check if user has selected a default currency
+        const hasSelected = localStorage.getItem('hasSelectedCurrency');
+        const defaultCurrency = localStorage.getItem('defaultCurrency');
+        
+        if (hasSelected && defaultCurrency) {
+          dispatch({ type: 'SET_HAS_SELECTED_CURRENCY', payload: true });
+          dispatch({ type: 'SET_DEFAULT_CURRENCY', payload: defaultCurrency });
+        }
+
+        // Initialize auth state
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        
+        if (sessionError) {
+          console.error('Error getting session:', sessionError);
+        }
+
+        if (session?.user && mounted) {
+          await fetchUserProfile(session.user.id);
+        }
+      } catch (error) {
+        console.error('Error initializing app:', error);
+      } finally {
+        if (mounted) {
+          dispatch({ type: 'SET_LOADING', payload: false });
+        }
       }
-      dispatch({ type: 'SET_LOADING', payload: false });
-    });
+    };
+
+    initializeApp();
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user) {
+      if (!mounted) return;
+
+      console.log('Auth state changed:', event, session?.user?.id);
+
+      if (event === 'SIGNED_IN' && session?.user) {
         await fetchUserProfile(session.user.id);
-      } else {
+      } else if (event === 'SIGNED_OUT') {
         dispatch({ type: 'SET_USER', payload: null });
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const fetchUserProfile = async (userId: string) => {
     try {
-      const { data, error } = await supabase
+      console.log('Fetching user profile for:', userId);
+
+      // Use maybeSingle() to handle cases where no row exists
+      const { data: profile, error } = await supabase
         .from('users')
         .select('*')
         .eq('id', userId)
-        .maybeSingle(); // Use maybeSingle() instead of single() to handle cases where no row exists
+        .maybeSingle();
 
       if (error) {
         console.error('Error fetching user profile:', error);
         return;
       }
 
-      if (data) {
-        dispatch({ type: 'SET_USER', payload: data });
+      if (profile) {
+        console.log('User profile found:', profile);
+        dispatch({ type: 'SET_USER', payload: profile });
       } else {
-        // User profile doesn't exist, this shouldn't happen with the trigger
-        // but let's create it as a fallback
+        // User profile doesn't exist, create it
         console.log('User profile not found, creating new profile...');
+        
         const { data: authUser } = await supabase.auth.getUser();
         
         if (authUser.user) {
@@ -327,13 +354,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
           if (createError) {
             console.error('Error creating user profile:', createError);
+            // Don't throw error, just log it
           } else if (newProfile) {
+            console.log('New user profile created:', newProfile);
             dispatch({ type: 'SET_USER', payload: newProfile });
           }
         }
       }
     } catch (error) {
       console.error('Error in fetchUserProfile:', error);
+      // Don't throw error to prevent infinite loading
     }
   };
 
