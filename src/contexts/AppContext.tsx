@@ -292,15 +292,36 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const fetchUserProfile = async (userId: string) => {
     try {
+      // Use maybeSingle to handle cases where no profile exists
       const { data, error } = await supabase
         .from('users')
         .select('*')
         .eq('id', userId)
-        .single();
+        .maybeSingle();
 
       if (error) throw error;
+      
       if (data) {
         dispatch({ type: 'SET_USER', payload: data });
+      } else {
+        // Create user profile if it doesn't exist
+        const { data: newProfile, error: createError } = await supabase
+          .from('users')
+          .insert({
+            id: userId,
+            default_currency_code: 'USD',
+            subscription_tier: 'basic',
+            llm_uses_today: 0,
+            last_llm_reset_date: new Date().toISOString()
+          })
+          .select()
+          .single();
+
+        if (createError) {
+          console.error('Error creating user profile:', createError);
+        } else if (newProfile) {
+          dispatch({ type: 'SET_USER', payload: newProfile });
+        }
       }
     } catch (error) {
       console.error('Error fetching user profile:', error);

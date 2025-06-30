@@ -30,7 +30,19 @@ export function Auth() {
           }
         });
 
-        if (error) throw error;
+        if (error) {
+          // Check if the error is due to email confirmation being required
+          if (error.message.includes('Email not confirmed') || error.message.includes('email_not_confirmed')) {
+            setMessage({ 
+              type: 'success', 
+              text: 'Account created! Please check your email and click the confirmation link to complete registration.' 
+            });
+            setMode('login');
+            setPassword('');
+            return;
+          }
+          throw error;
+        }
 
         if (data.user) {
           // Create user profile
@@ -62,17 +74,37 @@ export function Auth() {
         if (error) throw error;
 
         if (data.user) {
-          // Fetch user profile
+          // Fetch user profile using maybeSingle to handle missing profiles
           const { data: profile, error: profileError } = await supabase
             .from('users')
             .select('*')
             .eq('id', data.user.id)
-            .single();
+            .maybeSingle();
 
           if (profileError) {
             console.error('Error fetching user profile:', profileError);
-          } else {
+          } else if (profile) {
             dispatch({ type: 'SET_USER', payload: profile });
+          } else {
+            // Create user profile if it doesn't exist
+            const { data: newProfile, error: createError } = await supabase
+              .from('users')
+              .insert({
+                id: data.user.id,
+                email: data.user.email,
+                default_currency_code: 'USD',
+                subscription_tier: 'basic',
+                llm_uses_today: 0,
+                last_llm_reset_date: new Date().toISOString()
+              })
+              .select()
+              .single();
+
+            if (createError) {
+              console.error('Error creating user profile:', createError);
+            } else if (newProfile) {
+              dispatch({ type: 'SET_USER', payload: newProfile });
+            }
           }
 
           setMessage({ type: 'success', text: 'Logged in successfully!' });
