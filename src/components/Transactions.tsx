@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { Search, Filter, Edit, Trash2, Plus, Save, X, RefreshCw, AlertCircle } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { Search, Filter, Edit, Trash2, Plus, Save, X, RefreshCw, AlertCircle, DollarSign } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../contexts/AppContext';
 import { format } from 'date-fns';
@@ -23,66 +23,21 @@ export function Transactions() {
   const [sortBy, setSortBy] = useState<'date' | 'amount'>('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [editingTransaction, setEditingTransaction] = useState<number | null>(null);
-  const [convertedExpenses, setConvertedExpenses] = useState<any[]>([]);
-  const [isConverting, setIsConverting] = useState(false);
-  const [conversionError, setConversionError] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({
     item_service: '',
     amount: '',
     currency_code: '',
     category_id: '',
     expense_date: '',
-    note: ''
+    note: '',
+    converted_amount: '',
+    manual_conversion: false
   });
 
   const allCategories = [...DEFAULT_CATEGORIES, ...state.categories.filter(cat => !cat.is_default)];
 
-  // Convert all expenses to default currency for display
-  useEffect(() => {
-    const convertExpenses = async () => {
-      if (!state.defaultCurrency || state.expenses.length === 0) return;
-      
-      setIsConverting(true);
-      setConversionError(null);
-      
-      try {
-        const converted = await Promise.all(
-          state.expenses.map(async (expense) => {
-            if (expense.currency_code === state.defaultCurrency) {
-              return { ...expense, convertedAmount: expense.amount };
-            }
-            
-            try {
-              const conversion = await convertCurrency(
-                expense.amount,
-                expense.currency_code,
-                state.defaultCurrency!
-              );
-              
-              return { ...expense, convertedAmount: conversion.convertedAmount };
-            } catch (error) {
-              console.error(`Error converting ${expense.currency_code} to ${state.defaultCurrency}:`, error);
-              // Return original amount as fallback
-              return { ...expense, convertedAmount: expense.amount };
-            }
-          })
-        );
-        setConvertedExpenses(converted);
-      } catch (error) {
-        console.error('Error converting currencies:', error);
-        setConversionError('Failed to convert currencies. Showing original amounts.');
-        setConvertedExpenses(state.expenses.map(exp => ({ ...exp, convertedAmount: exp.amount })));
-      } finally {
-        setIsConverting(false);
-      }
-    };
-
-    convertExpenses();
-  }, [state.expenses, state.defaultCurrency]);
-
   const filteredTransactions = useMemo(() => {
-    const expensesToUse = convertedExpenses.length > 0 ? convertedExpenses : state.expenses;
-    let filtered = [...expensesToUse];
+    let filtered = [...state.expenses];
 
     // Filter by search term
     if (searchTerm) {
@@ -106,22 +61,28 @@ export function Transactions() {
         const dateB = new Date(b.expense_date).getTime();
         return sortOrder === 'desc' ? dateB - dateA : dateA - dateB;
       } else {
-        const amountA = a.convertedAmount || a.amount;
-        const amountB = b.convertedAmount || b.amount;
+        // Use converted amount for sorting if available, otherwise original amount
+        const amountA = a.converted_amount || a.amount;
+        const amountB = b.converted_amount || b.amount;
         return sortOrder === 'desc' ? amountB - amountA : amountA - amountB;
       }
     });
 
     return filtered;
-  }, [convertedExpenses, state.expenses, searchTerm, selectedCategory, sortBy, sortOrder]);
+  }, [state.expenses, searchTerm, selectedCategory, sortBy, sortOrder]);
 
   const formatCurrency = (amount: number, currency: string) => {
     return formatCurrencyWithSymbol(amount, currency);
   };
 
-  const totalAmount = filteredTransactions.reduce((sum, expense) => 
-    sum + (expense.convertedAmount || expense.amount), 0
-  );
+  // Calculate total using preserved conversion data
+  const totalAmount = filteredTransactions.reduce((sum, expense) => {
+    if (expense.currency_code === state.defaultCurrency) {
+      return sum + expense.amount;
+    }
+    // Use preserved converted amount if available
+    return sum + (expense.converted_amount || expense.amount);
+  }, 0);
 
   const handleEditTransaction = (transaction: any) => {
     setEditingTransaction(transaction.id);
@@ -131,7 +92,9 @@ export function Transactions() {
       currency_code: transaction.currency_code,
       category_id: transaction.category_id.toString(),
       expense_date: transaction.expense_date,
-      note: transaction.note || ''
+      note: transaction.note || '',
+      converted_amount: transaction.converted_amount?.toString() || '',
+      manual_conversion: transaction.manual_conversion || false
     });
   };
 
@@ -141,6 +104,58 @@ export function Transactions() {
     }
 
     const originalTransaction = state.expenses.find(exp => exp.id === editingTransaction)!;
+    
+    // Determine if we need to update conversion
+    let conversionData = {
+      converted_amount: originalTransaction.converted_amount,
+      conversion_rate: originalTransaction.conversion_rate,
+      conversion_date: originalTransaction.conversion_date,
+      manual_conversion: originalTransaction.manual_conversion
+    };
+
+    // If currency or amount changed, or if manual conversion was provided
+    if (originalTransaction.currency_code !== editForm.currency_code || 
+        originalTransaction.amount !== parseFloat(editForm.amount) ||
+        editForm.converted_amount !== (originalTransaction.converted_amount?.toString() || '')) {
+      
+      if (editForm.converted_amount && editForm.converted_amount !== '') {
+        // Manual conversion provided
+        conversionData = {
+          converted_amount: parseFloat(editForm.converted_amount),
+          conversion_rate: parseFloat(editForm.converted_amount) / parseFloat(editForm.amount),
+          conversion_date: new Date().toISOString(),
+          manual_conversion: true
+        };
+      } else if (editForm.currency_code !== state.defaultCurrency) {
+        // Auto conversion needed
+        try {
+          const conversion = await convertCurrency(
+            parseFloat(editForm.amount),
+            editForm.currency_code,
+            state.defaultCurrency!
+          );
+          
+          conversionData = {
+            converted_amount: conversion.convertedAmount,
+            conversion_rate: conversion.exchangeRate,
+            conversion_date: new Date().toISOString(),
+            manual_conversion: false
+          };
+        } catch (error) {
+          console.error('Error converting currency:', error);
+          // Keep original conversion data if conversion fails
+        }
+      } else {
+        // Same currency as default, no conversion needed
+        conversionData = {
+          converted_amount: undefined,
+          conversion_rate: undefined,
+          conversion_date: undefined,
+          manual_conversion: false
+        };
+      }
+    }
+
     const updatedTransaction = {
       ...originalTransaction,
       item_service: editForm.item_service,
@@ -149,56 +164,11 @@ export function Transactions() {
       category_id: parseInt(editForm.category_id),
       expense_date: editForm.expense_date,
       note: editForm.note || undefined,
-      category: allCategories.find(cat => cat.id.toString() === editForm.category_id)
+      category: allCategories.find(cat => cat.id.toString() === editForm.category_id),
+      ...conversionData
     };
 
     dispatch({ type: 'UPDATE_EXPENSE', payload: updatedTransaction });
-    
-    // If currency changed, trigger conversion update
-    if (originalTransaction.currency_code !== editForm.currency_code || 
-        originalTransaction.amount !== parseFloat(editForm.amount)) {
-      setIsConverting(true);
-      try {
-        if (editForm.currency_code === state.defaultCurrency) {
-          // No conversion needed
-          setConvertedExpenses(prev => 
-            prev.map(exp => 
-              exp.id === editingTransaction 
-                ? { ...updatedTransaction, convertedAmount: updatedTransaction.amount }
-                : exp
-            )
-          );
-        } else {
-          // Convert to default currency
-          const conversion = await convertCurrency(
-            updatedTransaction.amount,
-            updatedTransaction.currency_code,
-            state.defaultCurrency!
-          );
-          
-          setConvertedExpenses(prev => 
-            prev.map(exp => 
-              exp.id === editingTransaction 
-                ? { ...updatedTransaction, convertedAmount: conversion.convertedAmount }
-                : exp
-            )
-          );
-        }
-      } catch (error) {
-        console.error('Error converting updated transaction:', error);
-        // Use original amount as fallback
-        setConvertedExpenses(prev => 
-          prev.map(exp => 
-            exp.id === editingTransaction 
-              ? { ...updatedTransaction, convertedAmount: updatedTransaction.amount }
-              : exp
-          )
-        );
-      } finally {
-        setIsConverting(false);
-      }
-    }
-
     setEditingTransaction(null);
     setEditForm({
       item_service: '',
@@ -206,7 +176,9 @@ export function Transactions() {
       currency_code: '',
       category_id: '',
       expense_date: '',
-      note: ''
+      note: '',
+      converted_amount: '',
+      manual_conversion: false
     });
   };
 
@@ -218,48 +190,21 @@ export function Transactions() {
       currency_code: '',
       category_id: '',
       expense_date: '',
-      note: ''
+      note: '',
+      converted_amount: '',
+      manual_conversion: false
     });
   };
 
   const handleDeleteTransaction = (id: number) => {
     if (window.confirm('Are you sure you want to delete this transaction?')) {
       dispatch({ type: 'DELETE_EXPENSE', payload: id });
-      // Remove from converted expenses as well
-      setConvertedExpenses(prev => prev.filter(exp => exp.id !== id));
     }
   };
 
-  const handleRefreshRates = async () => {
-    setIsConverting(true);
-    setConversionError(null);
-    
-    // Clear cache to force fresh rates
+  const handleRefreshRates = () => {
     clearRateCache();
-    
-    try {
-      const converted = await Promise.all(
-        state.expenses.map(async (expense) => {
-          if (expense.currency_code === state.defaultCurrency) {
-            return { ...expense, convertedAmount: expense.amount };
-          }
-          
-          const conversion = await convertCurrency(
-            expense.amount,
-            expense.currency_code,
-            state.defaultCurrency!
-          );
-          
-          return { ...expense, convertedAmount: conversion.convertedAmount };
-        })
-      );
-      setConvertedExpenses(converted);
-    } catch (error) {
-      console.error('Error refreshing exchange rates:', error);
-      setConversionError('Failed to refresh exchange rates. Using cached rates.');
-    } finally {
-      setIsConverting(false);
-    }
+    alert('Exchange rate cache cleared. New rates will be fetched for future conversions.');
   };
 
   return (
@@ -270,20 +215,16 @@ export function Transactions() {
           <h1 className="text-2xl font-bold text-text font-mono">Transactions</h1>
           <p className="text-text-secondary font-mono">
             {filteredTransactions.length} transactions • Total: {formatCurrency(totalAmount, state.defaultCurrency || 'USD')}
-            {isConverting && (
-              <span className="ml-2 text-accent text-sm">• Converting...</span>
-            )}
           </p>
         </div>
         <div className="flex space-x-3">
           <button
             onClick={handleRefreshRates}
-            disabled={isConverting}
             className="btn-secondary flex items-center space-x-2"
-            title="Refresh exchange rates"
+            title="Clear exchange rate cache"
           >
-            <RefreshCw size={16} className={isConverting ? 'animate-spin' : ''} />
-            <span>Refresh Rates</span>
+            <RefreshCw size={16} />
+            <span>Clear Rate Cache</span>
           </button>
           <Link to="/add-expense" className="btn-primary flex items-center space-x-2">
             <Plus size={16} />
@@ -291,25 +232,6 @@ export function Transactions() {
           </Link>
         </div>
       </div>
-
-      {/* Conversion Error Alert */}
-      {conversionError && (
-        <div className="card border-error/20 bg-error/5">
-          <div className="flex items-center space-x-3">
-            <AlertCircle size={20} className="text-error flex-shrink-0" />
-            <div>
-              <p className="text-error font-mono font-semibold">Currency Conversion Issue</p>
-              <p className="text-text-secondary font-mono text-sm">{conversionError}</p>
-            </div>
-            <button
-              onClick={handleRefreshRates}
-              className="btn-secondary ml-auto"
-            >
-              Retry
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Filters */}
       <div className="card">
@@ -448,6 +370,35 @@ export function Transactions() {
                       />
                     </div>
                   </div>
+                  
+                  {/* Manual Conversion Override */}
+                  {editForm.currency_code !== state.defaultCurrency && (
+                    <div className="card border-accent/20 bg-accent/5">
+                      <div className="flex items-center space-x-2 mb-3">
+                        <DollarSign size={16} className="text-accent" />
+                        <label className="text-sm font-medium text-text font-mono">
+                          Manual Conversion Override (Optional)
+                        </label>
+                      </div>
+                      <div className="flex space-x-3">
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={editForm.converted_amount}
+                          onChange={(e) => setEditForm(prev => ({ ...prev, converted_amount: e.target.value }))}
+                          className="input flex-1"
+                          placeholder={`Amount in ${state.defaultCurrency}`}
+                        />
+                        <span className="flex items-center text-text-secondary font-mono">
+                          {state.defaultCurrency}
+                        </span>
+                      </div>
+                      <p className="text-xs text-text-muted font-mono mt-2">
+                        Leave empty for automatic conversion. Manual values override exchange rates.
+                      </p>
+                    </div>
+                  )}
+                  
                   <div>
                     <label className="block text-sm font-medium text-text font-mono mb-2">
                       Note (Optional)
@@ -489,10 +440,18 @@ export function Transactions() {
                         <p className="font-semibold text-text font-mono">
                           -{formatCurrency(transaction.amount, transaction.currency_code)}
                         </p>
-                        {transaction.currency_code !== state.defaultCurrency && transaction.convertedAmount && (
-                          <p className="text-xs text-text-muted font-mono">
-                            ≈ -{formatCurrency(transaction.convertedAmount, state.defaultCurrency || 'USD')}
-                          </p>
+                        {transaction.currency_code !== state.defaultCurrency && transaction.converted_amount && (
+                          <div className="text-xs text-text-muted font-mono">
+                            <p>≈ -{formatCurrency(transaction.converted_amount, state.defaultCurrency || 'USD')}</p>
+                            {transaction.manual_conversion && (
+                              <span className="text-accent">• Manual</span>
+                            )}
+                            {transaction.conversion_date && (
+                              <p className="text-xs">
+                                Rate from {format(new Date(transaction.conversion_date), 'MMM dd, yyyy')}
+                              </p>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>

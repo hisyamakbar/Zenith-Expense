@@ -1,66 +1,18 @@
-import React, { useMemo, useEffect, useState } from 'react';
+import React, { useMemo } from 'react';
 import { 
   TrendingUp, 
   TrendingDown, 
   DollarSign, 
   Calendar,
-  ArrowRight,
-  AlertCircle
+  ArrowRight
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../contexts/AppContext';
 import { format, startOfMonth, endOfMonth, subMonths, startOfWeek, endOfWeek } from 'date-fns';
-import { convertCurrency, formatCurrency as formatCurrencyWithSymbol } from '../lib/currencyApi';
+import { formatCurrency as formatCurrencyWithSymbol } from '../lib/currencyApi';
 
 export function Dashboard() {
   const { state } = useApp();
-  const [convertedExpenses, setConvertedExpenses] = useState<any[]>([]);
-  const [isConverting, setIsConverting] = useState(false);
-  const [conversionError, setConversionError] = useState<string | null>(null);
-
-  // Convert all expenses to default currency
-  useEffect(() => {
-    const convertExpenses = async () => {
-      if (!state.defaultCurrency || state.expenses.length === 0) return;
-      
-      setIsConverting(true);
-      setConversionError(null);
-      
-      try {
-        const converted = await Promise.all(
-          state.expenses.map(async (expense) => {
-            if (expense.currency_code === state.defaultCurrency) {
-              return { ...expense, convertedAmount: expense.amount };
-            }
-            
-            try {
-              const conversion = await convertCurrency(
-                expense.amount,
-                expense.currency_code,
-                state.defaultCurrency!
-              );
-              
-              return { ...expense, convertedAmount: conversion.convertedAmount };
-            } catch (error) {
-              console.error(`Error converting ${expense.currency_code} to ${state.defaultCurrency}:`, error);
-              // Return original amount as fallback
-              return { ...expense, convertedAmount: expense.amount };
-            }
-          })
-        );
-        setConvertedExpenses(converted);
-      } catch (error) {
-        console.error('Error converting currencies:', error);
-        setConversionError('Failed to convert currencies. Showing original amounts.');
-        // Fallback to original amounts
-        setConvertedExpenses(state.expenses.map(exp => ({ ...exp, convertedAmount: exp.amount })));
-      } finally {
-        setIsConverting(false);
-      }
-    };
-
-    convertExpenses();
-  }, [state.expenses, state.defaultCurrency]);
 
   const dashboardData = useMemo(() => {
     const now = new Date();
@@ -77,29 +29,36 @@ export function Dashboard() {
       end: endOfWeek(now)
     };
 
-    // Use converted expenses for calculations
-    const expensesToUse = convertedExpenses.length > 0 ? convertedExpenses : state.expenses;
-
     // Filter expenses by periods
-    const thisMonthExpenses = expensesToUse.filter(expense => {
+    const thisMonthExpenses = state.expenses.filter(expense => {
       const expenseDate = new Date(expense.expense_date);
       return expenseDate >= thisMonth.start && expenseDate <= thisMonth.end;
     });
 
-    const lastMonthExpenses = expensesToUse.filter(expense => {
+    const lastMonthExpenses = state.expenses.filter(expense => {
       const expenseDate = new Date(expense.expense_date);
       return expenseDate >= lastMonth.start && expenseDate <= lastMonth.end;
     });
 
-    const thisWeekExpenses = expensesToUse.filter(expense => {
+    const thisWeekExpenses = state.expenses.filter(expense => {
       const expenseDate = new Date(expense.expense_date);
       return expenseDate >= thisWeek.start && expenseDate <= thisWeek.end;
     });
 
-    // Calculate totals using converted amounts
-    const thisMonthTotal = thisMonthExpenses.reduce((sum, exp) => sum + (exp.convertedAmount || exp.amount), 0);
-    const lastMonthTotal = lastMonthExpenses.reduce((sum, exp) => sum + (exp.convertedAmount || exp.amount), 0);
-    const thisWeekTotal = thisWeekExpenses.reduce((sum, exp) => sum + (exp.convertedAmount || exp.amount), 0);
+    // Calculate totals using preserved conversion data
+    const calculateTotal = (expenses: any[]) => {
+      return expenses.reduce((sum, expense) => {
+        if (expense.currency_code === state.defaultCurrency) {
+          return sum + expense.amount;
+        }
+        // Use preserved converted amount if available
+        return sum + (expense.converted_amount || expense.amount);
+      }, 0);
+    };
+
+    const thisMonthTotal = calculateTotal(thisMonthExpenses);
+    const lastMonthTotal = calculateTotal(lastMonthExpenses);
+    const thisWeekTotal = calculateTotal(thisWeekExpenses);
 
     // Calculate change percentage
     const monthlyChange = lastMonthTotal > 0 
@@ -107,7 +66,7 @@ export function Dashboard() {
       : 0;
 
     // Recent transactions (last 5)
-    const recentTransactions = [...expensesToUse]
+    const recentTransactions = [...state.expenses]
       .sort((a, b) => new Date(b.expense_date).getTime() - new Date(a.expense_date).getTime())
       .slice(0, 5);
 
@@ -116,9 +75,9 @@ export function Dashboard() {
       thisWeekTotal,
       monthlyChange,
       recentTransactions,
-      totalTransactions: expensesToUse.length
+      totalTransactions: state.expenses.length
     };
-  }, [convertedExpenses, state.expenses]);
+  }, [state.expenses, state.defaultCurrency]);
 
   const formatCurrency = (amount: number) => {
     return formatCurrencyWithSymbol(amount, state.defaultCurrency || 'USD');
@@ -132,9 +91,6 @@ export function Dashboard() {
           <h1 className="text-2xl font-bold text-text font-mono">Dashboard</h1>
           <p className="text-text-secondary font-mono">
             {format(new Date(), 'EEEE, MMMM dd, yyyy')}
-            {isConverting && (
-              <span className="ml-2 text-accent text-sm">• Converting currencies...</span>
-            )}
           </p>
         </div>
         {state.isAuthenticated && (
@@ -150,19 +106,6 @@ export function Dashboard() {
           </div>
         )}
       </div>
-
-      {/* Conversion Error Alert */}
-      {conversionError && (
-        <div className="card border-error/20 bg-error/5">
-          <div className="flex items-center space-x-3">
-            <AlertCircle size={20} className="text-error flex-shrink-0" />
-            <div>
-              <p className="text-error font-mono font-semibold">Currency Conversion Issue</p>
-              <p className="text-text-secondary font-mono text-sm">{conversionError}</p>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -267,10 +210,13 @@ export function Dashboard() {
                   <p className="font-semibold text-text font-mono">
                     -{formatCurrencyWithSymbol(transaction.amount, transaction.currency_code)}
                   </p>
-                  {transaction.currency_code !== state.defaultCurrency && transaction.convertedAmount && (
-                    <p className="text-xs text-text-muted font-mono">
-                      ≈ -{formatCurrency(transaction.convertedAmount)}
-                    </p>
+                  {transaction.currency_code !== state.defaultCurrency && transaction.converted_amount && (
+                    <div className="text-xs text-text-muted font-mono">
+                      <p>≈ -{formatCurrency(transaction.converted_amount)}</p>
+                      {transaction.manual_conversion && (
+                        <span className="text-accent">Manual</span>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>

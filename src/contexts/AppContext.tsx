@@ -35,7 +35,7 @@ const DEFAULT_CATEGORIES = [
   { id: 8, name: 'Education', is_default: true },
 ];
 
-// Sample expenses with realistic data matching categories
+// Sample expenses with realistic data matching categories and preserved conversion data
 const SAMPLE_EXPENSES: Expense[] = [
   {
     id: 1,
@@ -47,7 +47,10 @@ const SAMPLE_EXPENSES: Expense[] = [
     expense_date: '2025-01-15',
     note: 'Big Mac combo meal',
     created_at: '2025-01-15T12:30:00Z',
-    category: DEFAULT_CATEGORIES[0]
+    category: DEFAULT_CATEGORIES[0],
+    converted_amount: 3.00, // Preserved conversion at time of creation
+    conversion_rate: 0.000067,
+    conversion_date: '2025-01-15T12:30:00Z'
   },
   {
     id: 2,
@@ -58,7 +61,10 @@ const SAMPLE_EXPENSES: Expense[] = [
     currency_code: 'IDR',
     expense_date: '2025-01-15',
     created_at: '2025-01-15T08:15:00Z',
-    category: DEFAULT_CATEGORIES[1]
+    category: DEFAULT_CATEGORIES[1],
+    converted_amount: 1.67,
+    conversion_rate: 0.000067,
+    conversion_date: '2025-01-15T08:15:00Z'
   },
   {
     id: 3,
@@ -71,6 +77,7 @@ const SAMPLE_EXPENSES: Expense[] = [
     note: 'Grande Americano',
     created_at: '2025-01-14T16:45:00Z',
     category: DEFAULT_CATEGORIES[0]
+    // No conversion needed as it's already in USD
   },
   {
     id: 4,
@@ -81,7 +88,10 @@ const SAMPLE_EXPENSES: Expense[] = [
     currency_code: 'IDR',
     expense_date: '2025-01-14',
     created_at: '2025-01-14T14:20:00Z',
-    category: DEFAULT_CATEGORIES[2]
+    category: DEFAULT_CATEGORIES[2],
+    converted_amount: 19.93,
+    conversion_rate: 0.000067,
+    conversion_date: '2025-01-14T14:20:00Z'
   },
   {
     id: 5,
@@ -93,7 +103,10 @@ const SAMPLE_EXPENSES: Expense[] = [
     expense_date: '2025-01-13',
     note: 'Monthly electricity payment',
     created_at: '2025-01-13T10:00:00Z',
-    category: DEFAULT_CATEGORIES[4]
+    category: DEFAULT_CATEGORIES[4],
+    converted_amount: 30.00,
+    conversion_rate: 0.000067,
+    conversion_date: '2025-01-13T10:00:00Z'
   },
   {
     id: 6,
@@ -106,6 +119,7 @@ const SAMPLE_EXPENSES: Expense[] = [
     note: 'Avatar 3 - 2 tickets',
     created_at: '2025-01-13T19:30:00Z',
     category: DEFAULT_CATEGORIES[3]
+    // No conversion needed as it's already in USD
   },
   {
     id: 7,
@@ -116,7 +130,10 @@ const SAMPLE_EXPENSES: Expense[] = [
     currency_code: 'IDR',
     expense_date: '2025-01-12',
     created_at: '2025-01-12T17:15:00Z',
-    category: DEFAULT_CATEGORIES[1]
+    category: DEFAULT_CATEGORIES[1],
+    converted_amount: 23.33,
+    conversion_rate: 0.000067,
+    conversion_date: '2025-01-12T17:15:00Z'
   },
   {
     id: 8,
@@ -128,7 +145,10 @@ const SAMPLE_EXPENSES: Expense[] = [
     expense_date: '2025-01-12',
     note: 'Weekly groceries',
     created_at: '2025-01-12T11:45:00Z',
-    category: DEFAULT_CATEGORIES[0]
+    category: DEFAULT_CATEGORIES[0],
+    converted_amount: 18.33,
+    conversion_rate: 0.000067,
+    conversion_date: '2025-01-12T11:45:00Z'
   },
   {
     id: 9,
@@ -140,7 +160,10 @@ const SAMPLE_EXPENSES: Expense[] = [
     expense_date: '2025-01-11',
     note: 'General checkup',
     created_at: '2025-01-11T15:30:00Z',
-    category: DEFAULT_CATEGORIES[5]
+    category: DEFAULT_CATEGORIES[5],
+    converted_amount: 13.33,
+    conversion_rate: 0.000067,
+    conversion_date: '2025-01-11T15:30:00Z'
   },
   {
     id: 10,
@@ -153,6 +176,7 @@ const SAMPLE_EXPENSES: Expense[] = [
     note: 'Udemy React course',
     created_at: '2025-01-10T09:00:00Z',
     category: DEFAULT_CATEGORIES[7]
+    // No conversion needed as it's already in USD
   }
 ];
 

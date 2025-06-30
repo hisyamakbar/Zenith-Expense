@@ -41,6 +41,11 @@ export type Expense = {
   note?: string;
   created_at: string;
   category?: Category;
+  // Fields for preserving conversion data at time of creation
+  converted_amount?: number; // Amount in default currency at time of creation
+  conversion_rate?: number; // Exchange rate used at time of creation
+  conversion_date?: string; // Date when conversion was done
+  manual_conversion?: boolean; // Whether conversion was manually adjusted
 };
 
 export type RecurringExpense = {

@@ -90,7 +90,7 @@ export function AddExpense() {
     setIsSubmitting(true);
 
     try {
-      // Create the expense object
+      // Create the expense object with preserved conversion data
       const newExpense = {
         id: Date.now(), // Temporary ID for local state
         user_id: state.user?.id || 'local',
@@ -101,7 +101,12 @@ export function AddExpense() {
         expense_date: formData.expense_date,
         note: formData.note || undefined,
         created_at: new Date().toISOString(),
-        category: allCategories.find(cat => cat.id.toString() === formData.category_id)
+        category: allCategories.find(cat => cat.id.toString() === formData.category_id),
+        // Preserve conversion data at time of creation
+        converted_amount: conversionPreview?.convertedAmount,
+        conversion_rate: conversionPreview?.exchangeRate,
+        conversion_date: conversionPreview ? new Date().toISOString() : undefined,
+        manual_conversion: false
       };
 
       // Add to local state
@@ -208,12 +213,15 @@ export function AddExpense() {
                     <>
                       ≈ {formatCurrencyWithSymbol(conversionPreview.convertedAmount, state.defaultCurrency!)} 
                       <span className="text-text-muted ml-2">
-                        (Rate: {conversionPreview.exchangeRate.toFixed(4)})
+                        (Rate: {conversionPreview.exchangeRate.toFixed(6)})
                       </span>
                     </>
                   )}
                 </span>
               </div>
+              <p className="text-xs text-text-muted font-mono mt-1">
+                This conversion rate will be saved with your expense and won't change over time.
+              </p>
             </div>
           )}
 
@@ -310,7 +318,8 @@ export function AddExpense() {
         <ul className="text-sm text-text-secondary font-mono space-y-2">
           <li>• Be specific with item names for better tracking</li>
           <li>• Use the original currency for accurate records</li>
-          <li>• Conversion rates are updated automatically from open.er-api.com</li>
+          <li>• Conversion rates are saved permanently and won't change</li>
+          <li>• Exchange rates are updated from open.er-api.com</li>
           <li>• Add notes for tax-deductible or important expenses</li>
           {state.isAuthenticated && (
             <li>• Try the AI Assistant for voice expense entry</li>
