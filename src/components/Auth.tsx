@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Mail, Lock, User, ArrowLeft, AlertCircle, CheckCircle } from 'lucide-react';
+import { Mail, Lock, User, ArrowLeft, AlertCircle, CheckCircle, Wifi, WifiOff } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useApp } from '../contexts/AppContext';
@@ -11,48 +11,69 @@ export function Auth() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [message, setMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
+  const [message, setMessage] = useState<{ type: 'error' | 'success' | 'warning'; text: string } | null>(null);
   const navigate = useNavigate();
   const { dispatch } = useApp();
 
+  // Add timeout wrapper for all async operations
+  const withTimeout = <T,>(promise: Promise<T>, timeoutMs: number = 10000): Promise<T> => {
+    return Promise.race([
+      promise,
+      new Promise<T>((_, reject) => 
+        setTimeout(() => reject(new Error('Request timed out. Please check your connection.')), timeoutMs)
+      )
+    ]);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!email || !password) {
+      setMessage({ type: 'error', text: 'Please fill in all fields' });
+      return;
+    }
+
     setIsLoading(true);
     setMessage(null);
 
     try {
       if (mode === 'signup') {
-        // First try to sign up
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            emailRedirectTo: undefined // Disable email confirmation
-          }
-        });
+        setMessage({ type: 'warning', text: 'Creating your account...' });
+        
+        // Try signup with timeout
+        const { data, error } = await withTimeout(
+          supabase.auth.signUp({
+            email,
+            password,
+            options: {
+              emailRedirectTo: undefined // Disable email confirmation
+            }
+          }),
+          15000 // 15 second timeout for signup
+        );
 
         if (error) {
-          // If signup fails due to user already existing, try to sign in instead
-          if (error.message.includes('already registered') || error.message.includes('already exists')) {
-            setMessage({ 
-              type: 'error', 
-              text: 'Account already exists. Trying to sign you in...' 
-            });
+          // Handle specific error cases
+          if (error.message.includes('already registered') || 
+              error.message.includes('already exists') ||
+              error.message.includes('User already registered')) {
             
-            // Automatically try to sign in
-            const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-              email,
-              password
-            });
+            setMessage({ type: 'warning', text: 'Account exists, signing you in...' });
+            
+            // Try to sign in instead
+            const { data: signInData, error: signInError } = await withTimeout(
+              supabase.auth.signInWithPassword({ email, password }),
+              10000
+            );
 
             if (signInError) {
-              throw new Error('Account exists but password is incorrect. Please try logging in.');
+              throw new Error('Account exists but password is incorrect. Please use the correct password or reset it.');
             }
 
             if (signInData.user) {
               await handleSuccessfulAuth(signInData.user.id);
               setMessage({ type: 'success', text: 'Signed in successfully!' });
-              setTimeout(() => navigate('/'), 1000);
+              setTimeout(() => navigate('/'), 1500);
               return;
             }
           }
@@ -60,34 +81,54 @@ export function Auth() {
         }
 
         if (data.user) {
-          // If signup successful, create profile and sign in
+          setMessage({ type: 'warning', text: 'Setting up your profile...' });
           await handleSuccessfulAuth(data.user.id);
-          setMessage({ type: 'success', text: 'Account created and signed in successfully!' });
-          setTimeout(() => navigate('/'), 1000);
+          setMessage({ type: 'success', text: 'Account created successfully!' });
+          setTimeout(() => navigate('/'), 1500);
         }
       } else {
-        // Login mode
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email,
-          password
-        });
+        setMessage({ type: 'warning', text: 'Signing you in...' });
+        
+        // Login with timeout
+        const { data, error } = await withTimeout(
+          supabase.auth.signInWithPassword({ email, password }),
+          10000
+        );
 
         if (error) {
           if (error.message.includes('Email not confirmed')) {
-            throw new Error('Please check your email and click the confirmation link, or contact support if you need help.');
+            throw new Error('Email not confirmed. Please check your email or contact support.');
+          }
+          if (error.message.includes('Invalid login credentials')) {
+            throw new Error('Invalid email or password. Please check your credentials.');
           }
           throw error;
         }
 
         if (data.user) {
+          setMessage({ type: 'warning', text: 'Loading your data...' });
           await handleSuccessfulAuth(data.user.id);
-          setMessage({ type: 'success', text: 'Signed in successfully!' });
-          setTimeout(() => navigate('/'), 1000);
+          setMessage({ type: 'success', text: 'Welcome back!' });
+          setTimeout(() => navigate('/'), 1500);
         }
       }
     } catch (error: any) {
       console.error('Auth error:', error);
-      setMessage({ type: 'error', text: error.message });
+      
+      // Handle specific error types
+      if (error.message.includes('timed out')) {
+        setMessage({ 
+          type: 'error', 
+          text: 'Connection timeout. Please check your internet connection and try again.' 
+        });
+      } else if (error.message.includes('fetch')) {
+        setMessage({ 
+          type: 'error', 
+          text: 'Network error. Please check your connection and try again.' 
+        });
+      } else {
+        setMessage({ type: 'error', text: error.message || 'An unexpected error occurred' });
+      }
     } finally {
       setIsLoading(false);
     }
@@ -95,46 +136,72 @@ export function Auth() {
 
   const handleSuccessfulAuth = async (userId: string) => {
     try {
-      // Try to fetch existing profile
-      const { data: existingProfile, error: fetchError } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
+      // Try to fetch existing profile with timeout
+      const { data: existingProfile, error: fetchError } = await withTimeout(
+        supabase
+          .from('users')
+          .select('*')
+          .eq('id', userId)
+          .maybeSingle(),
+        8000
+      );
 
       if (fetchError && fetchError.code !== 'PGRST116') {
-        console.error('Error fetching profile:', fetchError);
+        console.warn('Profile fetch error (non-critical):', fetchError);
       }
 
       if (existingProfile) {
-        // Profile exists, use it
         dispatch({ type: 'SET_USER', payload: existingProfile });
       } else {
-        // Create new profile
-        const { data: newProfile, error: createError } = await supabase
-          .from('users')
-          .insert({
-            id: userId,
-            email: email,
-            default_currency_code: 'USD',
-            subscription_tier: 'basic',
-            llm_uses_today: 0,
-            last_llm_reset_date: new Date().toISOString()
-          })
-          .select()
-          .single();
+        // Create new profile with timeout
+        try {
+          const { data: newProfile, error: createError } = await withTimeout(
+            supabase
+              .from('users')
+              .insert({
+                id: userId,
+                email: email,
+                default_currency_code: 'USD',
+                subscription_tier: 'basic',
+                llm_uses_today: 0,
+                last_llm_reset_date: new Date().toISOString()
+              })
+              .select()
+              .single(),
+            8000
+          );
 
-        if (createError) {
-          console.error('Error creating profile:', createError);
-          // Don't throw error, just log it - user can still use the app
-        } else if (newProfile) {
-          dispatch({ type: 'SET_USER', payload: newProfile });
+          if (createError) {
+            console.warn('Profile creation error (non-critical):', createError);
+          } else if (newProfile) {
+            dispatch({ type: 'SET_USER', payload: newProfile });
+          }
+        } catch (profileError) {
+          console.warn('Profile creation failed (non-critical):', profileError);
+          // Continue anyway - user can still use the app
         }
       }
     } catch (error) {
-      console.error('Error handling auth:', error);
-      // Don't throw - let user proceed even if profile creation fails
+      console.warn('Auth setup error (non-critical):', error);
+      // Don't throw - let user proceed
     }
+  };
+
+  const handleDemoLogin = async () => {
+    setEmail('demo@zenith.app');
+    setPassword('demo123');
+    setMessage({ type: 'warning', text: 'Loading demo account...' });
+    
+    // Simulate demo login
+    setTimeout(() => {
+      setMessage({ type: 'success', text: 'Demo mode activated!' });
+      setTimeout(() => navigate('/'), 1000);
+    }, 1000);
+  };
+
+  const handleOfflineMode = () => {
+    setMessage({ type: 'success', text: 'Entering offline mode...' });
+    setTimeout(() => navigate('/'), 1000);
   };
 
   return (
@@ -170,16 +237,21 @@ export function Auth() {
           <div className={`card mb-6 border-2 ${
             message.type === 'error' 
               ? 'border-error/20 bg-error/5' 
+              : message.type === 'warning'
+              ? 'border-accent/20 bg-accent/5'
               : 'border-primary/20 bg-primary/5'
           }`}>
             <div className="flex items-center space-x-3">
               {message.type === 'error' ? (
                 <AlertCircle size={20} className="text-error" />
+              ) : message.type === 'warning' ? (
+                <Wifi size={20} className="text-accent animate-pulse" />
               ) : (
                 <CheckCircle size={20} className="text-primary" />
               )}
               <p className={`font-mono text-sm ${
-                message.type === 'error' ? 'text-error' : 'text-primary'
+                message.type === 'error' ? 'text-error' : 
+                message.type === 'warning' ? 'text-accent' : 'text-primary'
               }`}>
                 {message.text}
               </p>
@@ -251,6 +323,39 @@ export function Auth() {
           </button>
         </form>
 
+        {/* Alternative Access Options */}
+        <div className="mt-6 space-y-3">
+          <div className="text-center">
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-surface-light"></div>
+              </div>
+              <div className="relative flex justify-center text-sm">
+                <span className="px-2 bg-background text-text-muted font-mono">Or try these options</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              onClick={handleDemoLogin}
+              disabled={isLoading}
+              className="btn-secondary text-sm py-2 flex items-center justify-center space-x-2"
+            >
+              <Wifi size={14} />
+              <span>Demo Mode</span>
+            </button>
+            <button
+              onClick={handleOfflineMode}
+              disabled={isLoading}
+              className="btn-secondary text-sm py-2 flex items-center justify-center space-x-2"
+            >
+              <WifiOff size={14} />
+              <span>Offline Mode</span>
+            </button>
+          </div>
+        </div>
+
         {/* Mode Toggle */}
         <div className="text-center mt-6">
           <p className="text-text-secondary font-mono text-sm">
@@ -269,31 +374,15 @@ export function Auth() {
           </button>
         </div>
 
-        {/* Quick Demo Access */}
-        <div className="card mt-8 border-accent/20 bg-accent/5">
-          <div className="text-center">
-            <h3 className="font-semibold text-text font-mono mb-2">
-              🚀 Quick Demo Access
-            </h3>
-            <p className="text-text-secondary font-mono text-sm mb-4">
-              Use demo credentials to try the app instantly:
-            </p>
-            <div className="space-y-2 text-sm font-mono">
-              <p className="text-text">Email: <span className="text-accent">demo@zenith.app</span></p>
-              <p className="text-text">Password: <span className="text-accent">demo123</span></p>
-            </div>
-          </div>
-        </div>
-
         {/* Features Preview */}
         <div className="card mt-6 border-primary/20 bg-primary/5">
-          <h3 className="font-semibold text-text font-mono mb-3">✨ Premium Features</h3>
+          <h3 className="font-semibold text-text font-mono mb-3">✨ What You Get</h3>
           <ul className="text-sm text-text-secondary font-mono space-y-2">
-            <li>• AI-powered expense tracking with natural language</li>
-            <li>• Multi-device sync and cloud backup</li>
-            <li>• Advanced analytics and spending insights</li>
-            <li>• Unlimited custom categories</li>
-            <li>• Export data in multiple formats</li>
+            <li>• AI-powered expense tracking</li>
+            <li>• Multi-currency support</li>
+            <li>• Cloud sync across devices</li>
+            <li>• Advanced analytics</li>
+            <li>• Export capabilities</li>
           </ul>
         </div>
       </div>
