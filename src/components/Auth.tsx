@@ -25,44 +25,61 @@ export function Auth() {
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
-          options: {
-            emailRedirectTo: undefined, // Disable email confirmation
-          }
         });
 
         if (error) throw error;
 
         if (data.user) {
-          // Create user profile
-          const { error: profileError } = await supabase
+          // Check if user profile already exists (in case of trigger failure)
+          const { data: existingProfile } = await supabase
             .from('users')
-            .insert({
-              id: data.user.id,
-              email: data.user.email,
-              default_currency_code: 'USD',
-              subscription_tier: 'basic',
-              llm_uses_today: 0,
-              last_llm_reset_date: new Date().toISOString().split('T')[0]
-            });
+            .select('*')
+            .eq('id', data.user.id)
+            .maybeSingle();
 
-          if (profileError) {
-            console.error('Error creating user profile:', profileError);
+          // Only create profile if it doesn't exist (trigger should handle this automatically)
+          if (!existingProfile) {
+            const { error: profileError } = await supabase
+              .from('users')
+              .insert({
+                id: data.user.id,
+                email: data.user.email,
+                default_currency_code: 'USD',
+                subscription_tier: 'basic',
+                llm_uses_today: 0,
+                last_llm_reset_date: new Date().toISOString().split('T')[0]
+              });
+
+            if (profileError) {
+              console.error('Error creating user profile:', profileError);
+              // Don't throw here, as the user might still be created successfully
+            }
           }
 
-          setMessage({ type: 'success', text: 'Account created successfully! You are now logged in.' });
-          
-          // Set user in context
-          dispatch({ type: 'SET_USER', payload: {
-            id: data.user.id,
-            email: data.user.email || '',
-            default_currency_code: 'USD',
-            subscription_tier: 'basic',
-            llm_uses_today: 0,
-            last_llm_reset_date: new Date().toISOString().split('T')[0],
-            created_at: new Date().toISOString()
-          }});
+          // If email confirmation is required, show appropriate message
+          if (!data.session) {
+            setMessage({ 
+              type: 'success', 
+              text: 'Account created! Please check your email to confirm your account before signing in.' 
+            });
+            setMode('login');
+          } else {
+            // User is automatically signed in (email confirmation disabled)
+            setMessage({ type: 'success', text: 'Account created successfully! You are now logged in.' });
+            
+            // Fetch the user profile
+            const { data: profile } = await supabase
+              .from('users')
+              .select('*')
+              .eq('id', data.user.id)
+              .single();
 
-          setTimeout(() => navigate('/'), 1500);
+            if (profile) {
+              dispatch({ type: 'SET_USER', payload: profile });
+            }
+
+            setTimeout(() => navigate('/'), 1500);
+          }
         }
       } else {
         const { data, error } = await supabase.auth.signInWithPassword({
@@ -78,12 +95,37 @@ export function Auth() {
             .from('users')
             .select('*')
             .eq('id', data.user.id)
-            .single();
+            .maybeSingle();
 
           if (profileError) {
             console.error('Error fetching user profile:', profileError);
-          } else {
+          } else if (profile) {
             dispatch({ type: 'SET_USER', payload: profile });
+          } else {
+            // Profile doesn't exist, create it
+            const { error: createError } = await supabase
+              .from('users')
+              .insert({
+                id: data.user.id,
+                email: data.user.email,
+                default_currency_code: 'USD',
+                subscription_tier: 'basic',
+                llm_uses_today: 0,
+                last_llm_reset_date: new Date().toISOString().split('T')[0]
+              });
+
+            if (!createError) {
+              // Fetch the newly created profile
+              const { data: newProfile } = await supabase
+                .from('users')
+                .select('*')
+                .eq('id', data.user.id)
+                .single();
+
+              if (newProfile) {
+                dispatch({ type: 'SET_USER', payload: newProfile });
+              }
+            }
           }
 
           setMessage({ type: 'success', text: 'Logged in successfully!' });
@@ -91,7 +133,22 @@ export function Auth() {
         }
       }
     } catch (error: any) {
-      setMessage({ type: 'error', text: error.message });
+      console.error('Authentication error:', error);
+      
+      // Handle specific error cases
+      if (error.message?.includes('email_not_confirmed')) {
+        setMessage({ 
+          type: 'error', 
+          text: 'Please check your email and click the confirmation link before signing in.' 
+        });
+      } else if (error.message?.includes('Invalid login credentials')) {
+        setMessage({ 
+          type: 'error', 
+          text: 'Invalid email or password. Please check your credentials and try again.' 
+        });
+      } else {
+        setMessage({ type: 'error', text: error.message || 'An unexpected error occurred.' });
+      }
     } finally {
       setIsLoading(false);
     }

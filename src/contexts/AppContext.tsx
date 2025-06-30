@@ -296,14 +296,43 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         .from('users')
         .select('*')
         .eq('id', userId)
-        .single();
+        .maybeSingle(); // Use maybeSingle() instead of single() to handle cases where no row exists
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error fetching user profile:', error);
+        return;
+      }
+
       if (data) {
         dispatch({ type: 'SET_USER', payload: data });
+      } else {
+        // User profile doesn't exist, create it
+        console.log('User profile not found, creating new profile...');
+        const { data: authUser } = await supabase.auth.getUser();
+        
+        if (authUser.user) {
+          const { data: newProfile, error: createError } = await supabase
+            .from('users')
+            .insert({
+              id: authUser.user.id,
+              email: authUser.user.email,
+              default_currency_code: 'USD',
+              subscription_tier: 'basic',
+              llm_uses_today: 0,
+              last_llm_reset_date: new Date().toISOString().split('T')[0]
+            })
+            .select()
+            .single();
+
+          if (createError) {
+            console.error('Error creating user profile:', createError);
+          } else if (newProfile) {
+            dispatch({ type: 'SET_USER', payload: newProfile });
+          }
+        }
       }
     } catch (error) {
-      console.error('Error fetching user profile:', error);
+      console.error('Error in fetchUserProfile:', error);
     }
   };
 
